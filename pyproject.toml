@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "git-coauthorship"
+dynamic = ["version"]
+description = "Audit and rewrite Co-Authored-By and author trailers in agent-authored git history"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Nitjsefnie" }]
+keywords = ["git", "co-authorship", "trailers", "history", "agents"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Version Control",
+]
+# Stdlib only, deliberately: these are standalone history tools, and a
+# dependency here would make every audit needlessly expensive.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/Nitjsefnie-Harness-Commons/git-coauthorship"
+Issues = "https://github.com/Nitjsefnie-Harness-Commons/git-coauthorship/issues"
+
+[project.scripts]
+reauthor = "git_coauthorship.reauthor:main"
+author-stats = "git_coauthorship.author_stats:main"
+
+[tool.setuptools]
+packages = ["git_coauthorship"]
+
+[tool.setuptools.dynamic]
+# Single source of truth: the wheel and the package can never disagree.
+version = { attr = "git_coauthorship.__version__" }
