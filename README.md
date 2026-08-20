@@ -3,7 +3,17 @@
 Audit and rewrite Co-Authored-By and author trailers in agent-authored git
 history.
 
-Install: `pip install git-coauthorship`
+## Install
+
+Not on PyPI. Every release publishes the wheel with a `SHA256SUMS` file beside
+it, and checking against it is the point: fetching "the newest release" is
+otherwise a promise about a URL, not about the artifact CI built.
+
+```sh
+gh release download v1.0.0 --repo Nitjsefnie-Harness-Commons/git-coauthorship
+sha256sum -c SHA256SUMS
+pip install ./git_coauthorship-1.0.0-py3-none-any.whl
+```
 
 | Tool | Purpose |
 |---|---|
