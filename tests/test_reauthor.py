@@ -413,6 +413,86 @@ def test_parse_when_accepts_epoch_and_iso8601_forms(_tmp):
     assert _RA.parse_when("2024-01-01T00:00:00") == 1704067200
 
 
+TRAILER = "Co-Authored-By: Opus 5 <noreply@anthropic.com>"
+
+
+def _branch_tip(d, ref):
+    return subprocess.check_output(
+        ["git", "-C", d, "rev-parse", ref], timeout=60).decode().strip()
+
+
+def _rename_fixture(d):
+    """A repo with `main` checked out and `other`, which is not its ancestor.
+
+    Both branches carry a commit with the old trailer, so a rename has work to
+    do on each and the difference between the two scopes is visible.
+    """
+    ident = ("Dev", "dev@example.com")
+    _repo(d, ident, ident)
+    subprocess.run(["git", "-C", d, "checkout", "-q", "-b", "other"],
+                   check=True, timeout=60)
+    _commit(d, ident, ident, f"other work\n\n{TRAILER}")
+    subprocess.run(["git", "-C", d, "checkout", "-q", "main"],
+                   check=True, timeout=60)
+    _commit(d, ident, ident, f"main work\n\n{TRAILER}")
+    return d
+
+
+def test_rename_leaves_branches_it_was_not_pointed_at_alone(tmp):
+    """The reported defect: `--rename` rewrote every ref in the repository.
+
+    A branch that is not an ancestor of HEAD and was never named came back
+    with a new SHA and no reflog, which in a checkout shared through
+    `git worktree` moves every other session's HEAD out from under it.
+    """
+    _require_filter_repo()
+    d = _rename_fixture(os.path.join(tmp, "scoped"))
+    before_other = _branch_tip(d, "other")
+    before_main = _branch_tip(d, "main")
+    _reauthor(d, "--rename", "Opus 5", "noreply@anthropic.com",
+              "Claude Opus 5", "noreply@anthropic.com")
+    assert _branch_tip(d, "main") != before_main, "the current branch was not rewritten"
+    assert _branch_tip(d, "other") == before_other, "an unnamed branch was rewritten"
+    body = subprocess.check_output(
+        ["git", "-C", d, "log", "-1", "--format=%B"], timeout=60).decode()
+    assert "Claude Opus 5" in body, body
+
+
+def test_rename_all_refs_is_available_explicitly(tmp):
+    """The old behaviour stays reachable, by asking for it."""
+    _require_filter_repo()
+    d = _rename_fixture(os.path.join(tmp, "allrefs"))
+    before_other = _branch_tip(d, "other")
+    _reauthor(d, "--all-refs", "--rename", "Opus 5", "noreply@anthropic.com",
+              "Claude Opus 5", "noreply@anthropic.com")
+    assert _branch_tip(d, "other") != before_other, "--all-refs left a ref alone"
+
+
+def test_rename_states_its_scope_and_dry_run_changes_nothing(tmp):
+    """No commit count, no ref list and no dry run was the other half of it."""
+    _require_filter_repo()
+    d = _rename_fixture(os.path.join(tmp, "dry"))
+    before = _branch_tip(d, "main")
+    out = _reauthor(d, "--dry-run", "--rename", "Opus 5",
+                    "noreply@anthropic.com", "Claude Opus 5",
+                    "noreply@anthropic.com").stdout
+    assert "refs/heads/main" in out, out
+    assert "1 commit(s) carry the old trailer" in out, out
+    assert "--all-refs" in out, out
+    assert _branch_tip(d, "main") == before, "--dry-run rewrote history"
+
+
+def test_rename_with_no_matches_does_not_rewrite(tmp):
+    """A rename that matches nothing still renamed every SHA under it."""
+    _require_filter_repo()
+    d = _rename_fixture(os.path.join(tmp, "nomatch"))
+    before = _branch_tip(d, "main")
+    out = _reauthor(d, "--rename", "Nobody", "nobody@example.com",
+                    "Somebody", "somebody@example.com").stdout
+    assert "Nothing to rename" in out, out
+    assert _branch_tip(d, "main") == before, "a no-op rename rewrote history"
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix="reauthor_")
 

@@ -7,4 +7,4 @@ version for its command's `--version` output; the value here is the
 distribution version setuptools reads.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
