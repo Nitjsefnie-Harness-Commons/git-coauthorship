@@ -12,6 +12,7 @@ that independence — a callback that wrote both fields would pass a
 git-filter-repo is optional here: absent, the end-to-end tests return early
 as not-applicable rather than failing.
 """
+import contextlib
 import os
 import shutil
 import subprocess
@@ -491,6 +492,54 @@ def test_rename_with_no_matches_does_not_rewrite(tmp):
                     "Somebody", "somebody@example.com").stdout
     assert "Nothing to rename" in out, out
     assert _branch_tip(d, "main") == before, "a no-op rename rewrote history"
+
+
+@contextlib.contextmanager
+def _in(directory):
+    """rename_scope reads the repository it is standing in."""
+    previous = os.getcwd()
+    os.chdir(directory)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
+
+
+def test_rename_scope_counts_and_names_only_the_current_branch(tmp):
+    _require_git()
+    d = _rename_fixture(os.path.join(tmp, "scope"))
+    with _in(d):
+        matches, refs = _RA.rename_scope("Opus 5", "noreply@anthropic.com", False)
+    assert matches == 1, matches
+    assert refs == ["refs/heads/main"], refs
+
+
+def test_rename_scope_over_all_refs_sees_every_branch(tmp):
+    _require_git()
+    d = _rename_fixture(os.path.join(tmp, "scopeall"))
+    with _in(d):
+        matches, refs = _RA.rename_scope("Opus 5", "noreply@anthropic.com", True)
+    assert matches == 2, matches
+    assert sorted(refs) == ["refs/heads/main", "refs/heads/other"], refs
+
+
+def test_rename_scope_honours_an_explicit_commit_set(tmp):
+    """--stop-at and the date window both arrive as a commit-hash scope."""
+    _require_git()
+    d = _rename_fixture(os.path.join(tmp, "scopeset"))
+    with _in(d):
+        assert _RA.rename_scope(
+            "Opus 5", "noreply@anthropic.com", False, scope=set())[0] == 0
+        head = _head(d)
+        assert _RA.rename_scope(
+            "Opus 5", "noreply@anthropic.com", False, scope={head})[0] == 1
+
+
+def test_rename_scope_outside_a_repository_reports_nothing(tmp):
+    plain = os.path.join(tmp, "plain")
+    os.makedirs(plain, exist_ok=True)
+    with _in(plain):
+        assert _RA.rename_scope("A", "a@x", False) == (None, [])
 
 
 def main():

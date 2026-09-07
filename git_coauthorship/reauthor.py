@@ -628,7 +628,8 @@ def rename_scope(old_name, old_email, all_refs, scope=None):
     walk = ["git", "log", "-z", "--format=%H%x00%B"]
     walk += ["--all"] if all_refs else ["HEAD"]
     try:
-        out = subprocess.check_output(walk, timeout=120)
+        out = subprocess.check_output(
+            walk, timeout=120, stderr=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError):
         return None, []
     tokens = out.split(b"\x00")
@@ -642,7 +643,8 @@ def rename_scope(old_name, old_email, all_refs, scope=None):
     if all_refs:
         try:
             refs = subprocess.check_output(
-                ["git", "show-ref"], timeout=60).decode("utf-8", "replace")
+                ["git", "show-ref"], timeout=60,
+                stderr=subprocess.DEVNULL).decode("utf-8", "replace")
         except (OSError, subprocess.SubprocessError):
             return matches, []
         return matches, [line.split(" ", 1)[1]
@@ -650,7 +652,7 @@ def rename_scope(old_name, old_email, all_refs, scope=None):
     try:
         head = subprocess.check_output(
             ["git", "rev-parse", "--symbolic-full-name", "HEAD"],
-            timeout=60).decode().strip()
+            timeout=60, stderr=subprocess.DEVNULL).decode().strip()
     except (OSError, subprocess.SubprocessError):
         head = ""
     return matches, [head or "HEAD (detached)"]
