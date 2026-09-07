@@ -22,8 +22,20 @@ keeps the original rewrite behavior intact.
 --rename   Rewrite one co-author identity across history. Every
            `Co-Authored-By: <OLD_NAME> <<OLD_EMAIL>>` trailer becomes
            `Co-Authored-By: <NEW_NAME> <<NEW_EMAIL>>`. Case-insensitive
-           on the trailer key. Commits without the old trailer are left
-           untouched, so it is safe to run across all history.
+           on the trailer key. Commits without the old trailer keep their
+           message, but every DESCENDANT of a rewritten commit gets a new
+           SHA, so the scope is a blast radius and not just a match count.
+           Scoped to the current branch unless --all-refs is given; it
+           prints the refs and the match count before touching anything,
+           and --dry-run stops after printing.
+--all-refs Modifier for --rename: rewrite every ref in the repository, not
+           only the current branch. Reflogs are expired and pre-rewrite
+           objects pruned, so a branch nobody named comes back with a new
+           SHA and no local way to recover the old one — in a checkout
+           shared through `git worktree` that moves every other session's
+           HEAD.
+--dry-run  Modifier for --rename: print the scope preflight and exit
+           without rewriting anything.
 --reauthor Overwrite the git AUTHOR of every commit whose author matches
            <OLD_NAME> <<OLD_EMAIL>> to <NEW_NAME> <<NEW_EMAIL>>. Author
            field only — committer and co-author trailers are untouched.
@@ -113,7 +125,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 
 def run(cmd, *, timeout=120, **kwargs):
@@ -602,11 +614,56 @@ def filter_all(name, email, stop_full=None):
         return
 
 
+def rename_scope(old_name, old_email, all_refs, scope=None):
+    """-> (matching commit count, refs the rewrite would touch).
+
+    The rename's blast radius is not its match count: every descendant of a
+    rewritten commit is rewritten with it, on every ref in scope. Reporting
+    both before acting is what separates 'two commits on my branch' from
+    'every branch in a checkout six sessions share'.
+    """
+    pattern = re.compile(
+        rb"(?i)co-authored-by:[ \t]*" + re.escape(old_name.encode())
+        + rb"[ \t]*<" + re.escape(old_email.encode()) + rb">")
+    walk = ["git", "log", "-z", "--format=%H%x00%B"]
+    walk += ["--all"] if all_refs else ["HEAD"]
+    try:
+        out = subprocess.check_output(walk, timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        return None, []
+    tokens = out.split(b"\x00")
+    matches = 0
+    for i in range(0, len(tokens) - 1, 2):
+        commit = tokens[i].decode("ascii", "replace").strip()
+        if scope is not None and commit not in scope:
+            continue
+        if pattern.search(tokens[i + 1]):
+            matches += 1
+    if all_refs:
+        try:
+            refs = subprocess.check_output(
+                ["git", "show-ref"], timeout=60).decode("utf-8", "replace")
+        except (OSError, subprocess.SubprocessError):
+            return matches, []
+        return matches, [line.split(" ", 1)[1]
+                         for line in refs.splitlines() if " " in line]
+    try:
+        head = subprocess.check_output(
+            ["git", "rev-parse", "--symbolic-full-name", "HEAD"],
+            timeout=60).decode().strip()
+    except (OSError, subprocess.SubprocessError):
+        head = ""
+    return matches, [head or "HEAD (detached)"]
+
+
 def rename_trailer(old_name, old_email, new_name, new_email, stop_full=None,
-                   restrict=None):
+                   restrict=None, all_refs=False, dry_run=False):
     """Rewrite every `Co-Authored-By: <old_name> <<old_email>>` trailer to the
     new name/email. Case-insensitive on the trailer key. Commits without the
-    old trailer are untouched, so this is safe across all history.
+    old trailer keep their message, but every descendant of a rewritten commit
+    is rewritten with it — so this is scoped to the current branch unless
+    `all_refs` asks for the whole repository, and it prints that scope before
+    acting.
 
     `restrict`, when given, is an explicit set of commit hashes (e.g. an
     author-date window from --before/--after); only those commits are
@@ -642,6 +699,24 @@ def rename_trailer(old_name, old_email, new_name, new_email, stop_full=None,
             return
         cfg["newer"] = list(scope)
 
+    matches, refs = rename_scope(old_name, old_email, all_refs, scope)
+    where = "every ref in the repository" if all_refs else "the current branch"
+    print(f"[rename] scope: {where} — {', '.join(refs) or 'no refs'}")
+    if matches is None:
+        print("[rename] could not count matching commits; git did not answer.")
+    else:
+        print(f"[rename] {matches} commit(s) carry the old trailer; every "
+              "descendant of one is rewritten with it.")
+        if not matches:
+            print("[rename] Nothing to rename — not running filter-repo.")
+            return
+    if not all_refs:
+        print("[rename] Other refs are untouched. Pass --all-refs to rewrite "
+              "the whole repository.")
+    if dry_run:
+        print("[rename] --dry-run: stopping before any rewrite.")
+        return
+
     cfg_path = _tmp_path("rename.json")
     cfg_path.write_text(json.dumps(cfg), encoding="utf-8")
 
@@ -673,6 +748,12 @@ def rename_trailer(old_name, old_email, new_name, new_email, stop_full=None,
     command = ["git-filter-repo", "--force"]
     if stop_full is not None:
         command += ["--refs", f"{stop_full}..HEAD"]
+    elif not all_refs:
+        # Without --refs, filter-repo rewrites EVERY ref, expires the reflogs
+        # and prunes the pre-rewrite objects: a branch nobody named comes back
+        # with a new SHA and no local way back. Default to what the operator is
+        # looking at. --refs also implies --partial, which keeps the reflogs.
+        command += ["--refs", "HEAD"]
     command += [flag, callback]
     _run_filter_repo(command)
 
@@ -853,6 +934,18 @@ def main():
         help="Modifier for --rename: restrict to commits whose AUTHOR date is "
         "at-or-after WHEN (unix epoch or ISO-8601; naive ISO = UTC).",
     )
+    ap.add_argument(
+        "--all-refs",
+        action="store_true",
+        help="Modifier for --rename: rewrite every ref in the repository, "
+        "not only the current branch. Expires reflogs and prunes the "
+        "pre-rewrite objects.",
+    )
+    ap.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Modifier for --rename: print the scope preflight and exit.",
+    )
     ap.add_argument("--push", action="store_true")
     args = ap.parse_args()
 
@@ -877,6 +970,10 @@ def main():
     window = commits_in_window(before_epoch, after_epoch)
     if window is not None and not args.rename:
         print("ERROR: --before/--after currently scope --rename only.")
+        sys.exit(1)
+
+    if (args.all_refs or args.dry_run) and not args.rename:
+        print("ERROR: --all-refs/--dry-run currently scope --rename only.")
         sys.exit(1)
 
     dirty = stash_if_needed()
@@ -916,7 +1013,9 @@ def main():
             )
             if window is not None:
                 print(f"[scope] author-date window restricts to {len(window)} commit(s).")
-            rename_trailer(on, oe, nn, ne, stop_full=stop_full, restrict=window)
+            rename_trailer(on, oe, nn, ne, stop_full=stop_full,
+                           restrict=window, all_refs=args.all_refs,
+                           dry_run=args.dry_run)
 
         if args.reauthor:
             on, oe, nn, ne = args.reauthor
