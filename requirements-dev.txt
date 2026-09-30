@@ -2,6 +2,6 @@
 # release cannot turn CI red on an unchanged commit. The package and suites
 # are standard-library only; git-filter-repo is optional for a handful of
 # end-to-end rewrite tests and is never installed by the wheel.
-pycodestyle==2.14.0
+pycodestyle==2.15.0
 pylint==4.0.7
 pyright==1.1.411
