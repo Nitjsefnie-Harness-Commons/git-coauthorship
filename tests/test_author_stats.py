@@ -106,6 +106,21 @@ def test_records_carry_six_fields_from_real_git(tmp):
     assert _AS.tally_authors(recs) == {"Tester <tester@example.com>": 3}
 
 
+def test_a_coauthor_line_git_does_not_parse_is_missing(tmp):
+    """#378 (agent-harness-bundle): with no blank line before it, the line is
+    body text to git, so the commit carries no trailer and the audit must say
+    so rather than disagree with git and the push gate."""
+    d, _hashes = _repo(tmp)
+    with open(os.path.join(d, "f.txt"), "a", encoding="utf-8") as fh:
+        fh.write("glued")
+    _git(d, "add", "f.txt")
+    _git(d, "commit", "-q", "-m",
+         "fourth glued\n\nbody text\nCo-Authored-By: Bot <bot@example.com>")
+    result, output, _error = _invoke(["-C", d])
+    assert "4 commits, 2 co-authored, 2 missing" in output, output
+    assert result == 1
+
+
 def test_main_summary_reports_tallies_and_missing_status(tmp):
     d, _hashes = _repo(tmp)
     result, output, error = _invoke(["-C", d])
