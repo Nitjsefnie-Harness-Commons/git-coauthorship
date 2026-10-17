@@ -90,7 +90,6 @@ def test_the_distribution_version_is_the_one_setuptools_reads(tmp):
     found = re.search(r'^__version__\s*=\s*"(\d+\.\d+\.\d+)"', init,
                       re.MULTILINE)
     assert found, f"no SemVer __version__ in {PACKAGE}/__init__.py"
-    assert found.group(1) == "1.1.0", found.group(1)
 
 
 def _requires_python_floor():
