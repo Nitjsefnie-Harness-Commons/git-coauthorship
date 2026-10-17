@@ -63,13 +63,18 @@ _SEP = b"\x00"
 
 
 def git_log_records(repo, revrange):
-    """Return [(hash, author, email, date, subject, body), ...] newest-first.
+    """Return [(hash, author, email, date, subject, trailers), ...] newest-first.
+
+    `trailers` is the trailer block AS GIT PARSES IT (`%(trailers:only,unfold)`),
+    not the raw message: a `Co-Authored-By:` line with no blank line before it
+    is body text to git and to GitHub, so counting it here made the audit
+    report a commit as co-authored that git, GitHub and the push gate do not.
 
     One `git log` call (no per-commit subprocess). Cross-platform: relies
     only on git + stdlib, no POSIX-only calls."""
     # %x00 emits a literal NUL between fields; -z emits a literal NUL between
     # commits. Six fields per commit → six NULs per commit in the stream.
-    fmt = "%H%x00%an%x00%ae%x00%ad%x00%s%x00%B"
+    fmt = "%H%x00%an%x00%ae%x00%ad%x00%s%x00%(trailers:only,unfold)"
     cmd = ["git"]
     if repo:
         cmd += ["-C", repo]
