@@ -779,14 +779,21 @@ def test_each_mode_states_its_scope_before_filter_repo_runs(tmp):
 
 def test_each_mode_states_the_stop_at_bound_in_its_scope(tmp):
     _require_git()
-    env, _ = _fake_filter_repo(tmp)
+    env, argv = _fake_filter_repo(tmp)
     problems = []
     for mode, args in _MODES.items():
         d = _shared_checkout(os.path.join(tmp, mode[2:]))
         stop = _git(d, "rev-parse", "HEAD~1").stdout.strip()
+        # A trailerless commit after the stop, so --older has a gap to fill.
+        _commit(d, OLD, OLD, "late work")
         problems += _stop_at_problems(
             _run_with(env, d, "--all-refs", "--stop-at", stop, *args),
             mode, stop)
+        command = _argv(argv) or []
+        if "--refs" not in command or \
+                command[command.index("--refs") + 1] != f"{stop}..HEAD":
+            problems.append(f"{mode}: filter-repo ran without --refs "
+                            f"<stop>..HEAD: {command}")
     assert not problems, problems
 
 

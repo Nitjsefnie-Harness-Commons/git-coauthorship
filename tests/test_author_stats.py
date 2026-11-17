@@ -313,6 +313,13 @@ def test_an_empty_noreply_id_prefix_is_gated(tmp):
     assert result == 1, output
 
 
+def test_an_upper_case_bot_tag_in_the_noreply_email_is_gated(tmp):
+    """Only the domain is compared case-blind; the `[bot]` tag is exact."""
+    result, output, _error = _only_gap_by(
+        tmp, "dependabot[bot] <dependabot[BOT]@users.noreply.github.com>")
+    assert result == 1, output
+
+
 def test_an_empty_noreply_bot_name_is_gated(tmp):
     result, output, _error = _only_gap_by(
         tmp, "github-actions[bot] <[bot]@users.noreply.github.com>")
@@ -333,14 +340,14 @@ def test_a_non_ascii_digit_noreply_id_is_not_a_bot(_tmp):
         "dependabot[bot]", "42+dependabot[bot]@users.noreply.github.com")
     assert not _AS.is_bot_author(
         "dependabot[bot]",
-        "٤٢+dependabot[bot]@users.noreply.github.com")
+        "\u0664\u0662+dependabot[bot]@users.noreply.github.com")
 
 
 def test_a_unicode_case_folded_noreply_domain_is_not_a_bot(_tmp):
     assert _AS.is_bot_author(
         "dependabot[bot]", "dependabot[bot]@users.noreply.GITHUB.com")
     assert not _AS.is_bot_author(
-        "dependabot[bot]", "dependabot[bot]@users.noreply.gıthub.com")
+        "dependabot[bot]", "dependabot[bot]@users.noreply.g\u0131thub.com")
 
 
 def test_a_bot_noreply_domain_near_miss_is_gated(tmp):
