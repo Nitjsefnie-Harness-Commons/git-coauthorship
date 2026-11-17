@@ -281,9 +281,8 @@ jobs:
           TAG: ${{ steps.version.outputs.tag }}
           REPO: ${{ github.repository }}
         # release.yml's `push: tags: v*` fires for a tag a HUMAN pushes, not
-        # for this GITHUB_TOKEN push. If both fire, the second run fails
-        # loudly once the first published, or completes the draft it left;
-        # a published release's assets never change.
+        # for this GITHUB_TOKEN push. A second run fails if the first
+        # published, else completes its draft; published assets never change.
         run: |
           gh workflow run release.yml --repo "$REPO" --ref "$TAG"
           echo "Dispatched release.yml against $TAG."
