@@ -162,46 +162,93 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ inputs.sha || github.sha }}
           REPO: ${{ github.repository }}
-        # It excludes ITSELF (or it waits on itself); it needs at least one
-        # other check, so it cannot tag before CI is scheduled; `cancelled`
-        # counts as failure: a newer push superseded this SHA, which is not a
-        # commit to release.
+        # Gates: workflows here whose push trigger fires wherever this one
+        # does, read from the files, so a fast one cannot stand in for a
+        # suite not yet registered. Each needs a successful push run; every
+        # other check run (bar ITSELF) must pass too. `cancelled` fails: a
+        # newer push superseded this SHA, which is not a commit to release.
         run: |
+          shopt -s nullglob
+          ignore="$(yq -o=json -I=0 '.on.push."paths-ignore" // []' \
+            .github/workflows/tag.yml)"
+          gates=()
+          for wf in .github/workflows/*.yml .github/workflows/*.yaml; do
+            [ "$wf" = .github/workflows/tag.yml ] && continue
+            on="$(yq -o=json -I=0 '.on' "$wf")" ||
+              { echo "Cannot parse $wf" >&2; exit 1; }
+            kind="$(jq -r --argjson ignore "$ignore" '
+              def list: if type == "array" then . else [.] end;
+              (if type == "string" or type == "array" then
+                 (if any(list[]; . == "push") then {} else null end)
+               elif type == "object" then
+                 (if has("push") then (.push // {}) else null end)
+               else error("no readable on:") end)
+              | if . == null then "other"
+                elif type != "object" then error("unreadable on.push")
+                elif has("paths") or has("tags") then "other"
+                elif has("branches") and
+                     any(.branches | list[]; test("[*?\\[!+]"))
+                  then error("branch pattern")
+                elif has("branches") and
+                     (any(.branches | list[]; . == "main") | not)
+                  then "other"
+                elif has("paths-ignore") and
+                     ((."paths-ignore" | list) - $ignore | length) > 0
+                  then "other"
+                else "gate" end' <<< "$on")" ||
+              { echo "Cannot tell whether $wf is a gate" >&2; exit 1; }
+            if [ "$kind" = gate ]; then gates+=("$wf"); fi
+          done
+          if [ "${#gates[@]}" -eq 0 ]; then
+            echo "No gate workflows found; refusing to tag unchecked." >&2
+            exit 1
+          fi
+          echo "Gate workflows: ${gates[*]}"
+
+          tab=$'\t' nl=$'\n'
           deadline=$(( SECONDS + 45 * 60 ))
           while [ "$SECONDS" -lt "$deadline" ]; do
-            runs="$(gh api --paginate \
+            runs="$(gh api --paginate -H "Cache-Control: no-cache" \
+              "repos/$REPO/actions/runs?head_sha=$SHA&event=push&per_page=100" \
+              --jq '.workflow_runs[]
+                    | "\(.id)\t\(.path)\t\(.status)\t\(.conclusion)"')"
+            checks="$(gh api --paginate \
               -H "Cache-Control: no-cache" \
               "repos/$REPO/commits/$SHA/check-runs" \
               --jq '.check_runs[] | select(.name | startswith("tag") | not)
                     | "\(.status)\t\(.conclusion)\t\(.name)"')"
 
-            if [ -z "$runs" ]; then
-              echo "no other check runs reported yet, waiting..."
-              sleep 20
-              continue
-            fi
+            gate_runs=""
+            for wf in "${gates[@]}"; do
+              run="$(echo "$runs" | awk -F'\t' -v wf="$wf" '$2 == wf' \
+                | sort -n | tail -n 1 | cut -f3,4)"
+              gate_runs+="${gate_runs:+$nl}${run:-no push run yet$tab}$tab$wf"
+            done
+            all="$gate_runs${checks:+$nl$checks}"
 
-            pending="$(echo "$runs" | grep -cv '^completed' || true)"
+            pending="$(echo "$all" | grep -cv '^completed' || true)"
             if [ "$pending" -gt 0 ]; then
-              echo "$pending check(s) still running:"
-              echo "$runs" | grep -v '^completed' | awk '{print "    " $0}'
+              echo "$pending gate(s) or check(s) not finished:"
+              echo "$all" | grep -v '^completed' | awk '{print "    " $0}'
               sleep 20
               continue
             fi
 
-            echo "All checks completed:"
-            echo "$runs" | awk '{print "    " $0}'
-            bad="$(echo "$runs" \
-              | awk -F'\t' '$2 != "success" && $2 != "skipped" && $2 != "neutral"')"
+            echo "All gates and checks completed:"
+            echo "$all" | awk '{print "    " $0}'
+            bad="$(echo "$gate_runs" | awk -F'\t' '$2 != "success"'
+              echo "$checks" | awk -F'\t' \
+                '$2 != "success" && $2 != "skipped" && $2 != "neutral"')"
             if [ -n "$bad" ]; then
-              echo "Refusing to tag: these checks did not pass:" >&2
+              echo "Refusing to tag: these did not pass:" >&2
               echo "$bad" | awk '{print "    " $0}' >&2
               exit 1
             fi
-            echo "Every check passed — proceeding."
+            echo "Every gate and check passed — proceeding."
             exit 0
           done
-          echo "Timed out after 45 minutes waiting for checks on $SHA" >&2
+          echo "Timed out after 45 minutes on $SHA; not finished:" >&2
+          echo "$all" | grep -v '^completed' | awk '{print "    " $0}' >&2
           exit 1
 
       - name: Create and push the tag
