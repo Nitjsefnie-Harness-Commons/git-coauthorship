@@ -210,6 +210,7 @@ def test_a_bot_is_a_bot_name_with_a_bot_noreply_address(_tmp):
             ("dependabot[bot]", "42+dependabot[BOT]@users.noreply.github.com", False),
             ("dependabot[bot]", "42+[bot]@users.noreply.github.com", False),
             ("dependabot[bot]", "+dependabot[bot]@users.noreply.github.com", False),
+            ("dependabot[bot]", "ci+dependabot[bot]@users.noreply.github.com", False),
             ("dependabot[bot]", "\u0664\u0662+dependabot[bot]@users.noreply.github.com", False),
             ("dependabot[bot]", "42+dependabot[bot]@users.noreply.g\u0131thub.com", False),
             ("dependabot[bot]", "42+dependabot[bot]@users.noreply.github.com.example", False)):
