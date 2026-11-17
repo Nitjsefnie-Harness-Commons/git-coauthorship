@@ -146,3 +146,20 @@ jobs:
           # declares contents: read.
           GH_TOKEN: ${{ github.token }}
         run: zizmor --no-progress .github/workflows/
+
+      - name: Download gitleaks and verify its digest
+        # Last: the checks above refuse in seconds. The digest is from the
+        # release's checksums file; bump it with secrets.yml's copy.
+        run: |
+          tarball=gitleaks_8.30.1_linux_x64.tar.gz
+          curl -fsSL --retry 3 --connect-timeout 10 --max-time 120 -o "$tarball" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/${tarball}"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  ${tarball}" | sha256sum -c -
+          tar -xzf "$tarball" gitleaks
+
+      - name: Scan the history for secrets
+        # This job runs on every pull request and push to main, so requiring
+        # its check gates merges. Bare: the exit status is the verdict.
+        # Bounded to HEAD: fetch-depth 0 fetched every branch, and another
+        # branch's leak is not this head's; secrets.yml scans them daily.
+        run: ./gitleaks detect --verbose --redact --log-opts='--full-history --diff-filter=tuxdb HEAD'
