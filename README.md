@@ -65,6 +65,11 @@ never lower it to turn a build green.
 | `actionlint` | `actionlint` + `zizmor` over the workflow YAML. A broken workflow does not go red, it silently stops running. |
 | `tag` | Watches `git_coauthorship/__init__.py`. When `__version__` changes on `main`, it waits for every other check on that commit and then pushes `v<version>`. |
 | `release` | Fires on that tag: runs every suite, builds the wheel, and publishes `SHA256SUMS` beside it. |
+| `claim` | `Nitjsefnie-Actions/claim`: `/claim` assigns the commenter to an open, unassigned issue; `/unclaim` (or `/release`) removes the commenter's own assignment. |
+| `pr gate` | `Nitjsefnie-Actions/pr-gate`: checks a pull-request description against `.github/PULL_REQUEST_TEMPLATE.md` and its assigned issues, plus commit attribution and Conventional Commits subjects. |
+| `comment share` | `Nitjsefnie-Actions/comment-ratchet`: gates each tracked source file's comment share (target 15%) against `.github/comment-share.json`; the default branch commits its own tightened records. |
+| `size baseline` | `Nitjsefnie-Actions/size-ratchet`: gates file line counts against per-type ceilings and `.github/size-baseline.json`, and budgets the `tests/` tree's total; the default branch commits its own records. |
+| `pin test screen` | `Nitjsefnie-Actions/pin-guard`: lists test lines that assert on a pinned dependency version as review comments; not a gate. |
 
 **There is deliberately no speed gate here**, unlike the dashboard repos.
 pytest cannot run these suites — the tests are plain functions taking
