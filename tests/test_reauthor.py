@@ -542,6 +542,274 @@ def test_rename_scope_outside_a_repository_reports_nothing(tmp):
         assert _RA.rename_scope("A", "a@x", False) == (None, [])
 
 
+OLD = ("Peter Z", "p@example.com")
+NEW = ("Nitjsefnie", "z@example.com")
+_MODES = {
+    "--reauthor": ["--reauthor", *OLD, *NEW],
+    "--recommitter": ["--recommitter", *OLD, *NEW],
+    "--older": ["--older", *NEW],
+    "--all": ["--all", *NEW],
+}
+
+
+def _git(d, *args):
+    return subprocess.run(["git", "-C", d, *args], capture_output=True,
+                          text=True, check=False, timeout=60)
+
+
+def _shared_checkout(d):
+    """The reported repro: `main` checked out, `other` sharing its first
+    commit and checked out in a second `git worktree`, and an `origin/main`
+    remote-tracking ref. Every commit is OLD's as author and committer and
+    carries no trailer, so each mode has work on both branches.
+    """
+    repo = _repo(os.path.join(d, "repo"), OLD, OLD)
+    base = _head(repo)
+    assert _git(repo, "branch", "other").returncode == 0
+    assert _git(repo, "worktree", "add", "-q", os.path.join(d, "wt"),
+                "other").returncode == 0
+    _commit(repo, OLD, OLD, "main work")
+    assert _git(repo, "update-ref", "refs/remotes/origin/main",
+                base).returncode == 0
+    return repo
+
+
+def _reflog(d, ref):
+    return _git(d, "reflog", "show", "--format=%H", ref).stdout.split()
+
+
+def _scope_line(out, mode):
+    """The `[<mode>] scope: ...` line, or '' when none was printed."""
+    tag = f"[{mode[2:]}] scope: "
+    return next((line for line in out.splitlines()
+                 if line.startswith(tag)), "")
+
+
+def _rewrites_only_the_current_branch(tmp, mode):
+    _require_filter_repo()
+    d = _shared_checkout(tmp)
+    before = {ref: _branch_tip(d, ref)
+              for ref in ("main", "other", "refs/remotes/origin/main")}
+    reflog = _reflog(d, "other")
+    out = _reauthor(d, *_MODES[mode]).stdout
+    # Collected, not asserted one by one: a reverted --refs breaks every
+    # limb at once, and the report should show each of them.
+    problems = []
+    if _branch_tip(d, "main") == before["main"]:
+        problems.append("the current branch was not rewritten")
+    if _branch_tip(d, "other") != before["other"]:
+        problems.append("the other worktree's branch moved")
+    origin = _git(d, "rev-parse", "--verify", "-q",
+                  "refs/remotes/origin/main").stdout.strip()
+    if origin != before["refs/remotes/origin/main"]:
+        problems.append(f"origin/main resolves to {origin!r}")
+    if _git(d, "cat-file", "-e", before["main"]).returncode != 0:
+        problems.append("the current branch's old tip was pruned")
+    if not reflog or _reflog(d, "other") != reflog:
+        problems.append("the other branch's reflog changed")
+    scope = _scope_line(out, mode)
+    if "the current branch" not in scope or \
+            not scope.endswith("refs/heads/main"):
+        problems.append(f"scope line {scope!r}")
+    if f"[{mode[2:]}] Other refs are untouched. Pass --all-refs to " \
+            "rewrite the whole repository." not in out.splitlines():
+        problems.append("no note that other refs are untouched")
+    assert not problems, f"{mode}: {problems}\n{out}"
+
+
+def test_reauthor_rewrites_only_the_current_branch(tmp):
+    _rewrites_only_the_current_branch(tmp, "--reauthor")
+
+
+def test_recommitter_rewrites_only_the_current_branch(tmp):
+    _rewrites_only_the_current_branch(tmp, "--recommitter")
+
+
+def test_older_rewrites_only_the_current_branch(tmp):
+    _rewrites_only_the_current_branch(tmp, "--older")
+
+
+def test_all_rewrites_only_the_current_branch(tmp):
+    _rewrites_only_the_current_branch(tmp, "--all")
+
+
+def _all_refs_rewrites_the_other_branch(tmp, mode):
+    _require_filter_repo()
+    d = _shared_checkout(tmp)
+    before_main = _branch_tip(d, "main")
+    before_other = _branch_tip(d, "other")
+    out = _reauthor(d, "--all-refs", *_MODES[mode]).stdout
+    assert _branch_tip(d, "main") != before_main, f"{mode}: main kept\n{out}"
+    assert _branch_tip(d, "other") != before_other, \
+        f"{mode}: --all-refs left the other branch alone\n{out}"
+    assert "every ref in the repository" in _scope_line(out, mode), out
+    assert "Other refs are untouched" not in out, out
+
+
+def test_reauthor_all_refs_rewrites_the_other_branch(tmp):
+    _all_refs_rewrites_the_other_branch(tmp, "--reauthor")
+
+
+def test_recommitter_all_refs_rewrites_the_other_branch(tmp):
+    _all_refs_rewrites_the_other_branch(tmp, "--recommitter")
+
+
+def test_older_all_refs_rewrites_the_other_branch(tmp):
+    _all_refs_rewrites_the_other_branch(tmp, "--older")
+
+
+def test_all_all_refs_rewrites_the_other_branch(tmp):
+    _all_refs_rewrites_the_other_branch(tmp, "--all")
+
+
+def test_stop_at_keeps_all_refs_on_the_current_branch(tmp):
+    """--stop-at's <stop>..HEAD bound wins over --all-refs, so a branch
+    holding the rewritten commit plus its own is left alone."""
+    _require_filter_repo()
+    d = _repo(os.path.join(tmp, "r"), OLD, OLD)
+    stop = _head(d)
+    _commit(d, OLD, OLD, "main work")
+    assert _git(d, "checkout", "-q", "-b", "other").returncode == 0
+    _commit(d, OLD, OLD, "other work")
+    assert _git(d, "checkout", "-q", "main").returncode == 0
+    before_main, before_other = _branch_tip(d, "main"), _branch_tip(d, "other")
+    _reauthor(d, "--all-refs", "--stop-at", stop, *_MODES["--reauthor"])
+    assert _branch_tip(d, "main") != before_main, "main was not rewritten"
+    assert _branch_tip(d, "other") == before_other, "--stop-at did not bound it"
+
+
+def _fake_filter_repo(tmp):
+    """-> (env, argv file): a git-filter-repo that records its arguments,
+    prints a marker to stderr and fails, so nothing is rewritten and the
+    marker shows where in reauthor's output the rewrite was attempted."""
+    if os.name == "nt":
+        _util.skip("the fake filter-repo wrapper uses a POSIX shell")
+    wrappers = os.path.join(tmp, "bin")
+    os.makedirs(wrappers)
+    argv = os.path.join(tmp, "argv")
+    fake = os.path.join(wrappers, "git-filter-repo")
+    with open(fake, "w", encoding="utf-8") as f:
+        f.write("#!/bin/sh\n"
+                "if [ \"$1\" = \"--help\" ]; then exit 0; fi\n"
+                f"printf '%s\\n' \"$@\" > '{argv}'\n"
+                "echo FILTER-REPO-RAN >&2\n"
+                "exit 9\n")
+    os.chmod(fake, 0o755)
+    return {**os.environ, "PATH": wrappers + os.pathsep + os.environ["PATH"]}, argv
+
+
+def _run_with(env, d, *args):
+    return subprocess.run(
+        [sys.executable, os.path.join(_util.SCRIPTS, "reauthor.py"), *args],
+        cwd=d, env=env, capture_output=True, text=True, check=False,
+        timeout=60).stdout
+
+
+def _argv(path):
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    os.remove(path)
+    return lines
+
+
+def test_each_mode_states_its_scope_before_filter_repo_runs(tmp):
+    _require_git()
+    env, argv = _fake_filter_repo(tmp)
+    problems = []
+    for mode, args in _MODES.items():
+        d = _shared_checkout(os.path.join(tmp, mode[2:]))
+        out = _run_with(env, d, *args)
+        scope = out.find(_scope_line(out, mode) or "\0")
+        ran = out.find("FILTER-REPO-RAN")
+        if not 0 <= scope < ran:
+            problems.append(f"{mode}: scope at {scope}, rewrite at {ran}")
+        command = _argv(argv) or []
+        if "--refs" not in command or \
+                command[command.index("--refs") + 1] != "HEAD":
+            problems.append(f"{mode}: filter-repo ran without --refs HEAD")
+    assert not problems, problems
+
+
+def test_all_refs_lifts_the_refs_limit_for_each_mode(tmp):
+    _require_git()
+    env, argv = _fake_filter_repo(tmp)
+    problems = []
+    for mode, args in _MODES.items():
+        d = _shared_checkout(os.path.join(tmp, mode[2:]))
+        out = _run_with(env, d, "--all-refs", *args)
+        command = _argv(argv)
+        if command is None:
+            problems.append(f"{mode}: filter-repo never ran\n{out}")
+        elif "--refs" in command:
+            problems.append(f"{mode}: --all-refs still passed --refs")
+        if "every ref in the repository" not in _scope_line(out, mode):
+            problems.append(f"{mode}: scope line {_scope_line(out, mode)!r}")
+    assert not problems, problems
+
+
+def _old_identity_only_on_other(d):
+    """`main` holds nothing of OLD's; `other` holds one commit by OLD."""
+    ident = ("Dev", "dev@example.com")
+    _repo(d, ident, ident)
+    assert _git(d, "checkout", "-q", "-b", "other").returncode == 0
+    _commit(d, OLD, OLD, "other work")
+    assert _git(d, "checkout", "-q", "main").returncode == 0
+    return d
+
+
+def test_identity_preflight_counts_only_the_current_branch(tmp):
+    """The preflight count and its zero-match skip describe the pass that
+    runs, so they walk what that pass rewrites."""
+    _require_git()
+    d = _old_identity_only_on_other(tmp)
+    other = _branch_tip(d, "other")
+    with _in(d):
+        for field in ("author", "committer"):
+            assert _RA.matching_identity_commits(field, *OLD) == [], field
+            assert _RA.matching_identity_commits(
+                field, *OLD, all_refs=True) == [other], field
+
+
+def test_identity_count_follows_all_refs_at_the_call_site(tmp):
+    _require_git()
+    env, argv = _fake_filter_repo(tmp)
+    d = _old_identity_only_on_other(os.path.join(tmp, "r"))
+    for mode in ("--reauthor", "--recommitter"):
+        out = _run_with(env, d, *_MODES[mode])
+        assert "0 matching commits; history left untouched" in out, out
+        assert _argv(argv) is None, f"{mode}: filter-repo ran on no match"
+        out = _run_with(env, d, "--all-refs", *_MODES[mode])
+        assert "1 matching commit will be rewritten" in out, out
+        assert _argv(argv) is not None, f"{mode}: --all-refs skipped"
+
+
+def _refused(d, *args):
+    before = _head(d)
+    r = subprocess.run(
+        [sys.executable, os.path.join(_util.SCRIPTS, "reauthor.py"), *args],
+        cwd=d, capture_output=True, text=True, check=False, timeout=60)
+    assert r.returncode == 1, f"{args}: exit {r.returncode}\n{r.stdout}"
+    assert _head(d) == before, f"{args} rewrote HEAD"
+    return r.stdout.splitlines()
+
+
+def test_all_refs_with_only_recent_is_refused(tmp):
+    """--recent rebases HEAD only, so --all-refs would widen nothing."""
+    d = _repo(os.path.join(tmp, "r"), OLD, OLD)
+    _commit(d, OLD, OLD, "second")
+    out = _refused(d, "--all-refs", "--recent", "1", *NEW)
+    assert "ERROR: --all-refs widens --older, --all, --rename, --reauthor "\
+        "and --recommitter; none of them was given." in out, out
+
+
+def test_dry_run_still_scopes_rename_only(tmp):
+    d = _repo(os.path.join(tmp, "r"), OLD, OLD)
+    out = _refused(d, "--dry-run", *_MODES["--reauthor"])
+    assert "ERROR: --dry-run currently scopes --rename only." in out, out
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix="reauthor_")
 

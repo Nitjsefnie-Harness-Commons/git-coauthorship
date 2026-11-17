@@ -12,13 +12,15 @@ keeps the original rewrite behavior intact.
              - Otherwise → use the default --older value
            The default regex is ``Opus`` solely for compatibility with this
            historical Claude workflow; it is not a generic git rule.
-           Existing coauthored commits are never touched.
+           Existing coauthored commits are never touched. Scoped to the
+           current branch unless --all-refs is given.
 --older-inherit
            Regex selecting which existing boundary trailer --older inherits.
            Default: ``Opus`` (legacy behavior). Use a provider/model regex for
            another history, ``.`` to inherit any non-empty trailer, or ``(?!)``
            to disable inheritance and always use the --older default.
---all      Overwrite every commit with a single trailer.
+--all      Overwrite every commit on the current branch with a single
+           trailer; with --all-refs, every commit in the repository.
 --rename   Rewrite one co-author identity across history. Every
            `Co-Authored-By: <OLD_NAME> <<OLD_EMAIL>>` trailer becomes
            `Co-Authored-By: <NEW_NAME> <<NEW_EMAIL>>`. Case-insensitive
@@ -28,12 +30,17 @@ keeps the original rewrite behavior intact.
            Scoped to the current branch unless --all-refs is given; it
            prints the refs and the match count before touching anything,
            and --dry-run stops after printing.
---all-refs Modifier for --rename: rewrite every ref in the repository, not
-           only the current branch. Reflogs are expired and pre-rewrite
+--all-refs Modifier for --older, --all, --rename, --reauthor and
+           --recommitter: rewrite every ref in the repository, not only the
+           current branch. Without it each of those modes rewrites the
+           current branch alone and prints that scope before acting; given
+           with none of them (--recent only ever rebases the current
+           branch) it is refused. Reflogs are expired and pre-rewrite
            objects pruned, so a branch nobody named comes back with a new
            SHA and no local way to recover the old one — in a checkout
            shared through `git worktree` that moves every other session's
-           HEAD.
+           HEAD. --stop-at overrides it: the rewrite stays bounded to
+           <stop>..HEAD on the current branch.
 --dry-run  Modifier for --rename: print the scope preflight and exit
            without rewriting anything.
 --reauthor Overwrite the git AUTHOR of every commit whose author matches
@@ -42,16 +49,19 @@ keeps the original rewrite behavior intact.
            For cleaning up commits where an agent was recorded as the
            author instead of a co-author. It does NOT add a co-author
            trailer; pair it with --older or a manual pass if the agent
-           also needs to appear as Co-Authored-By.
+           also needs to appear as Co-Authored-By. Scoped to the current
+           branch unless --all-refs is given.
 --recommitter
            Same as --reauthor but for the COMMITTER field. Matches on the
            committer identity, not the author's — a web-merged PR is
            authored by a person and committed by `GitHub
            <noreply@github.com>`, so the two fields need separate passes.
-           Author field and co-author trailers are untouched.
-           Both identity modes preflight exact matches. Zero matches skip
-           git-filter-repo entirely; a nonzero pass prints its match count and
-           warns that filter-repo strips GPG signatures before rewriting.
+           Author field and co-author trailers are untouched. Scoped to
+           the current branch unless --all-refs is given.
+           Both identity modes preflight exact matches in that scope. Zero
+           matches skip git-filter-repo entirely; a nonzero pass prints its
+           match count and warns that filter-repo strips GPG signatures
+           before rewriting.
 --between  Modifier for --older: fill only INTERIOR gaps — runs of
            un-trailered commits bracketed by a co-authored commit on
            BOTH sides. The oldest pre-AI run (nothing co-authored older
@@ -550,7 +560,56 @@ def _run_filter_repo(command):
     return result
 
 
-def filter_repo_with_mapping(mapping, stop_full=None):
+def refs_args(stop_full, all_refs):
+    """-> the `--refs` arguments that bound a git-filter-repo pass."""
+    if stop_full is not None:
+        return ["--refs", f"{stop_full}..HEAD"]
+    if all_refs:
+        return []
+    # Without --refs, filter-repo rewrites EVERY ref, expires the reflogs
+    # and prunes the pre-rewrite objects: a branch nobody named comes back
+    # with a new SHA and no local way back. Default to what the operator is
+    # looking at. --refs also implies --partial, which keeps the reflogs.
+    return ["--refs", "HEAD"]
+
+
+def scope_refs(all_refs):
+    """-> full names of the refs a rewrite in this scope touches."""
+    if all_refs:
+        try:
+            refs = subprocess.check_output(
+                ["git", "show-ref"], timeout=60,
+                stderr=subprocess.DEVNULL).decode("utf-8", "replace")
+        except (OSError, subprocess.SubprocessError):
+            return []
+        return [line.split(" ", 1)[1]
+                for line in refs.splitlines() if " " in line]
+    try:
+        head = subprocess.check_output(
+            ["git", "rev-parse", "--symbolic-full-name", "HEAD"],
+            timeout=60, stderr=subprocess.DEVNULL).decode().strip()
+    except (OSError, subprocess.SubprocessError):
+        head = ""
+    return [head or "HEAD (detached)"]
+
+
+def scope_lines(mode, all_refs, refs):
+    """-> (the scope line, the untouched-refs note or None) for `mode`."""
+    where = "every ref in the repository" if all_refs else "the current branch"
+    scope = f"[{mode}] scope: {where} — {', '.join(refs) or 'no refs'}"
+    if all_refs:
+        return scope, None
+    return scope, (f"[{mode}] Other refs are untouched. Pass --all-refs to "
+                   "rewrite the whole repository.")
+
+
+def announce_scope(mode, all_refs):
+    for line in scope_lines(mode, all_refs, scope_refs(all_refs)):
+        if line:
+            print(line)
+
+
+def filter_repo_with_mapping(mapping, stop_full=None, all_refs=False):
     if not mapping:
         print("[filter-repo] No matching commits; history left untouched.")
         return
@@ -576,14 +635,12 @@ def filter_repo_with_mapping(mapping, stop_full=None):
     )
     callback_path.write_text(callback, encoding="utf-8")
 
-    command = ["git-filter-repo", "--force"]
-    if stop_full is not None:
-        command += ["--refs", f"{stop_full}..HEAD"]
+    command = ["git-filter-repo", "--force", *refs_args(stop_full, all_refs)]
     command += ["--commit-callback", str(callback_path)]
     _run_filter_repo(command)
 
 
-def filter_all(name, email, stop_full=None):
+def filter_all(name, email, stop_full=None, all_refs=False):
     trailer_line = build_trailer(name, email)
     if stop_full is None:
         # Fast path: rewrite every commit unconditionally via message-callback.
@@ -599,7 +656,8 @@ def filter_all(name, email, stop_full=None):
             "return message\n"
         )
         _run_filter_repo(
-            ["git-filter-repo", "--force", "--message-callback", callback])
+            ["git-filter-repo", "--force", *refs_args(None, all_refs),
+             "--message-callback", callback])
     else:
         # Bounded path: build a mapping of {commit_id: trailer} for commits
         # newer than stop_full, then route through the existing commit-callback
@@ -640,22 +698,7 @@ def rename_scope(old_name, old_email, all_refs, scope=None):
             continue
         if pattern.search(tokens[i + 1]):
             matches += 1
-    if all_refs:
-        try:
-            refs = subprocess.check_output(
-                ["git", "show-ref"], timeout=60,
-                stderr=subprocess.DEVNULL).decode("utf-8", "replace")
-        except (OSError, subprocess.SubprocessError):
-            return matches, []
-        return matches, [line.split(" ", 1)[1]
-                         for line in refs.splitlines() if " " in line]
-    try:
-        head = subprocess.check_output(
-            ["git", "rev-parse", "--symbolic-full-name", "HEAD"],
-            timeout=60, stderr=subprocess.DEVNULL).decode().strip()
-    except (OSError, subprocess.SubprocessError):
-        head = ""
-    return matches, [head or "HEAD (detached)"]
+    return matches, scope_refs(all_refs)
 
 
 def rename_trailer(old_name, old_email, new_name, new_email, stop_full=None,
@@ -702,8 +745,8 @@ def rename_trailer(old_name, old_email, new_name, new_email, stop_full=None,
         cfg["newer"] = list(scope)
 
     matches, refs = rename_scope(old_name, old_email, all_refs, scope)
-    where = "every ref in the repository" if all_refs else "the current branch"
-    print(f"[rename] scope: {where} — {', '.join(refs) or 'no refs'}")
+    scope_line, untouched = scope_lines("rename", all_refs, refs)
+    print(scope_line)
     if matches is None:
         print("[rename] could not count matching commits; git did not answer.")
     else:
@@ -712,9 +755,8 @@ def rename_trailer(old_name, old_email, new_name, new_email, stop_full=None,
         if not matches:
             print("[rename] Nothing to rename — not running filter-repo.")
             return
-    if not all_refs:
-        print("[rename] Other refs are untouched. Pass --all-refs to rewrite "
-              "the whole repository.")
+    if untouched:
+        print(untouched)
     if dry_run:
         print("[rename] --dry-run: stopping before any rewrite.")
         return
@@ -747,25 +789,18 @@ def rename_trailer(old_name, old_email, new_name, new_email, stop_full=None,
         )
         flag = "--commit-callback"
 
-    command = ["git-filter-repo", "--force"]
-    if stop_full is not None:
-        command += ["--refs", f"{stop_full}..HEAD"]
-    elif not all_refs:
-        # Without --refs, filter-repo rewrites EVERY ref, expires the reflogs
-        # and prunes the pre-rewrite objects: a branch nobody named comes back
-        # with a new SHA and no local way back. Default to what the operator is
-        # looking at. --refs also implies --partial, which keeps the reflogs.
-        command += ["--refs", "HEAD"]
-    command += [flag, callback]
+    command = ["git-filter-repo", "--force", *refs_args(stop_full, all_refs),
+               flag, callback]
     _run_filter_repo(command)
 
 
-def matching_identity_commits(field, old_name, old_email, stop_full=None):
+def matching_identity_commits(field, old_name, old_email, stop_full=None,
+                              all_refs=False):
     """Commit hashes whose selected identity exactly matches the old value.
 
-    Scan every reachable local ref because an unbounded git-filter-repo pass
-    does the same. A stop boundary retains the existing HEAD-relative scope
-    used by the callback.
+    Walks what the identity pass rewrites: the current branch, or every ref
+    when `all_refs` is set. A stop boundary keeps only commits in
+    <stop>..HEAD, the range the callback is bounded to.
     """
     if field not in ("author", "committer"):
         raise ValueError(f"field must be 'author' or 'committer', got {field!r}")
@@ -774,7 +809,8 @@ def matching_identity_commits(field, old_name, old_email, stop_full=None):
     )
     fmt = f"%H%x00{name_field}%x00{email_field}"
     out = subprocess.check_output(
-        ["git", "log", "--all", "-z", f"--format={fmt}"], timeout=120)
+        ["git", "log", "--all" if all_refs else "HEAD", "-z",
+         f"--format={fmt}"], timeout=120)
     tokens = out.split(b"\x00")
     if tokens and not tokens[-1]:
         tokens.pop()
@@ -793,7 +829,7 @@ def matching_identity_commits(field, old_name, old_email, stop_full=None):
 
 
 def rewrite_identity(field, old_name, old_email, new_name, new_email,
-                     stop_full=None):
+                     stop_full=None, all_refs=False):
     """Overwrite the git identity in `field` ('author' or 'committer') on
     every commit whose identity in THAT SAME field matches
     (old_name, old_email). The other identity field and the co-author
@@ -806,12 +842,15 @@ def rewrite_identity(field, old_name, old_email, new_name, new_email,
     matching on the author identity would never see it.
 
     Values are passed to the git-filter-repo callback via a JSON sidecar
-    so identities containing quotes can't break the generated code."""
+    so identities containing quotes can't break the generated code.
+
+    The pass rewrites the current branch only, or every ref when `all_refs`
+    is set; the preflight count walks the same scope."""
     if field not in ("author", "committer"):
         raise ValueError(f"field must be 'author' or 'committer', got {field!r}")
     flag = "--reauthor" if field == "author" else "--recommitter"
     matches = matching_identity_commits(
-        field, old_name, old_email, stop_full=stop_full)
+        field, old_name, old_email, stop_full=stop_full, all_refs=all_refs)
     count = len(matches)
     noun = "commit" if count == 1 else "commits"
     if not matches:
@@ -859,23 +898,23 @@ def rewrite_identity(field, old_name, old_email, new_name, new_email,
         f'    commit.{field}_email = cfg["new_email"].encode()\n'
     )
 
-    command = ["git-filter-repo", "--force"]
-    if stop_full is not None:
-        command += ["--refs", f"{stop_full}..HEAD"]
-    command += ["--commit-callback", callback]
-    _run_filter_repo(command)
+    _run_filter_repo(["git-filter-repo", "--force",
+                      *refs_args(stop_full, all_refs),
+                      "--commit-callback", callback])
 
 
-def reauthor(old_name, old_email, new_name, new_email, stop_full=None):
+def reauthor(old_name, old_email, new_name, new_email, stop_full=None,
+             all_refs=False):
     """Rewrite the AUTHOR identity. See rewrite_identity()."""
     return rewrite_identity("author", old_name, old_email, new_name, new_email,
-                            stop_full=stop_full)
+                            stop_full=stop_full, all_refs=all_refs)
 
 
-def recommitter(old_name, old_email, new_name, new_email, stop_full=None):
+def recommitter(old_name, old_email, new_name, new_email, stop_full=None,
+                all_refs=False):
     """Rewrite the COMMITTER identity. See rewrite_identity()."""
     return rewrite_identity("committer", old_name, old_email, new_name,
-                            new_email, stop_full=stop_full)
+                            new_email, stop_full=stop_full, all_refs=all_refs)
 
 
 def main():
@@ -939,9 +978,9 @@ def main():
     ap.add_argument(
         "--all-refs",
         action="store_true",
-        help="Modifier for --rename: rewrite every ref in the repository, "
-        "not only the current branch. Expires reflogs and prunes the "
-        "pre-rewrite objects.",
+        help="Modifier for --older, --all, --rename, --reauthor and "
+        "--recommitter: rewrite every ref in the repository, not only the "
+        "current branch. Expires reflogs and prunes the pre-rewrite objects.",
     )
     ap.add_argument(
         "--dry-run",
@@ -974,8 +1013,14 @@ def main():
         print("ERROR: --before/--after currently scope --rename only.")
         sys.exit(1)
 
-    if (args.all_refs or args.dry_run) and not args.rename:
-        print("ERROR: --all-refs/--dry-run currently scope --rename only.")
+    if args.all_refs and not (args.older or args.all or args.rename
+                              or args.reauthor or args.recommitter):
+        print("ERROR: --all-refs widens --older, --all, --rename, --reauthor "
+              "and --recommitter; none of them was given.")
+        sys.exit(1)
+
+    if args.dry_run and not args.rename:
+        print("ERROR: --dry-run currently scopes --rename only.")
         sys.exit(1)
 
     dirty = stash_if_needed()
@@ -1002,11 +1047,15 @@ def main():
                 f"default older = {older_default}; inherit regex = "
                 f"{args.older_inherit!r}"
             )
-            filter_repo_with_mapping(mapping, stop_full=stop_full)
+            announce_scope("older", args.all_refs)
+            filter_repo_with_mapping(mapping, stop_full=stop_full,
+                                     all_refs=args.all_refs)
 
         if args.all:
             print(f"[filter-repo] Tagging ALL commits with: {build_trailer(args.all[0], args.all[1])}")
-            filter_all(args.all[0], args.all[1], stop_full=stop_full)
+            announce_scope("all", args.all_refs)
+            filter_all(args.all[0], args.all[1], stop_full=stop_full,
+                       all_refs=args.all_refs)
 
         if args.rename:
             on, oe, nn, ne = args.rename
@@ -1024,14 +1073,18 @@ def main():
             print(
                 f"[filter-repo] Reauthoring: author {on} <{oe}>  ->  {nn} <{ne}>"
             )
-            reauthor(on, oe, nn, ne, stop_full=stop_full)
+            announce_scope("reauthor", args.all_refs)
+            reauthor(on, oe, nn, ne, stop_full=stop_full,
+                     all_refs=args.all_refs)
 
         if args.recommitter:
             on, oe, nn, ne = args.recommitter
             print(
                 f"[filter-repo] Recommitting: committer {on} <{oe}>  ->  {nn} <{ne}>"
             )
-            recommitter(on, oe, nn, ne, stop_full=stop_full)
+            announce_scope("recommitter", args.all_refs)
+            recommitter(on, oe, nn, ne, stop_full=stop_full,
+                        all_refs=args.all_refs)
 
         if args.push:
             # Plain --force, not --force-with-lease: git-filter-repo strips
