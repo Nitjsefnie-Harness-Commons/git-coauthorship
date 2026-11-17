@@ -76,8 +76,8 @@ jobs:
 
       - name: Build the wheel
         run: |
-          python -m pip install --upgrade pip build
-          python -m build --wheel
+          python -m pip install --require-hashes -r requirements-build.txt
+          python -m build --wheel --no-isolation
 
       - name: Install it with no checkout in reach and run every command
         run: |
@@ -108,12 +108,10 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: requirements-*.txt
+          cache-dependency-path: requirements-test.txt
 
       - name: Install the coverage toolchain
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements-test.txt
+        run: python -m pip install --require-hashes -r requirements-test.txt
 
       - name: Measure
         id: measure

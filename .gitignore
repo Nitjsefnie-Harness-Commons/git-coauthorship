@@ -30,6 +30,7 @@
 !/README.md
 !/pyproject.toml
 !/pyrightconfig.json
+!/requirements-build.txt
 !/requirements-dev.txt
 !/requirements-test.txt
 !/run_tests.py
