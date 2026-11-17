@@ -166,7 +166,8 @@ class ThisRepository(Fixture):
             ".github/workflows/types.yml", ".pylintrc", "git_coauthorship/__init__.py",
             "git_coauthorship/_scope.py", "git_coauthorship/author_stats.py",
             "git_coauthorship/reauthor.py",
-            "requirements-dev.txt", "requirements-test.txt", "run_tests.py", "tests/_util.py",
+            "requirements-build.txt", "requirements-dev.txt", "requirements-test.txt",
+            "run_tests.py", "tests/_util.py",
             "tests/test_author_stats.py", "tests/test_package_contract.py",
             "tests/test_reauthor.py"])
 
