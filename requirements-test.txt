@@ -1,20 +1,22 @@
 # Test-only toolchain, pinned so a tool release cannot turn CI red on an
 # unchanged commit (same reason as requirements-dev.txt).
 #
-# The SUITE itself needs nothing: it is stdlib unittest driven by
-# run_tests.py, and the package is stdlib-only on purpose. `coverage` is
+# The SUITE itself needs nothing: each suite is a script of plain functions
+# that tests/_util.py collects and runs, launched by run_tests.py as its own
+# subprocess, and the package is stdlib-only on purpose. `coverage` is
 # here for the gate in tests.yml, which also calls `--format=markdown` and
 # `--fail-under` directly so the gate is a step of its own and the summary
 # still renders when it is red.
 #
 # Coverage runs each suite as its own subprocess with --parallel-mode and
-# then combines, because that is exactly what run_tests.py does. Running
-# them in one process would not be measuring the thing CI actually runs.
+# then combines, because run_tests.py also runs each suite as its own
+# subprocess. Running them in one process would not be measuring the thing
+# CI actually runs.
 #
 # There is deliberately NO pytest here, and no speed.yml in this repo.
 # pytest cannot run these suites: the tests are plain functions taking
-# helper arguments, which pytest reads as fixture requests. Checked in
-# every repo of this family — collection either errors outright or finds
-# nothing at all. The speed comparator needs --junitxml, which only pytest
-# emits, so there is no timing harness to build the gate on.
+# helper arguments, which pytest reads as fixture requests. It collects
+# the functions, and each one errors at setup with `fixture 'tmp' not
+# found` (or `'_tmp'`). The speed comparator needs --junitxml, which only
+# pytest emits, so there is no timing harness to build the gate on.
 coverage==7.15.4
