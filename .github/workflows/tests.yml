@@ -36,7 +36,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python: ["3.11", "3.12", "3.13"]
+        python: ["3.11", "3.12", "3.13", "3.14"]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
 
@@ -93,10 +93,10 @@ jobs:
           path: dist/*.whl
 
   coverage:
-    # A JOB of its own, not steps inside the matrix above: the matrix is
-    # 3 OSes x 3 Pythons, and coverage of the same code nine times over
-    # tells you the same number nine times. One run, on the newest Python
-    # and the cheapest runner.
+    # A JOB of its own, not steps inside the matrix above: the matrix runs
+    # every OS x Python pair, and coverage of the same code on each pair
+    # tells you the same number every time. One run, on one Python and the
+    # cheapest runner.
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
