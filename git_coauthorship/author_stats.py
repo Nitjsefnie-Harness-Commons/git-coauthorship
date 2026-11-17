@@ -36,8 +36,9 @@ email is GitHub's bot noreply address,
 the summary and the `--missing` list mark it exempt.
 
 Exit status: 0 if every commit in range that is not bot-authored carries a
-trailer, 1 if any of those is missing one, 2 on error (no git, not a repo,
-bad range). The 0/1 split lets this gate a pre-push hook or CI step.
+`Co-Authored-By:` trailer, 1 if any of those is missing one, 2 on error
+(no git, not a repo, bad range). The 0/1 split lets this gate a pre-push
+hook or CI step.
 
 Examples
 --------
@@ -70,7 +71,7 @@ _SEP = b"\x00"
 
 # The name excludes `+`, so only a numeric `<id>+` may prefix it.
 _BOT_EMAIL = re.compile(
-    r"(?:\d+\+)?[^@+]+\[bot\]@(?i:users\.noreply\.github\.com)")
+    r"(?:\d+\+)?[^@+]+\[bot\]@(?i:users\.noreply\.github\.com)", re.ASCII)
 
 
 def git_log_records(repo, revrange):

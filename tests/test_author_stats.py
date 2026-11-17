@@ -238,6 +238,16 @@ def test_a_human_gap_beside_bot_gaps_exits_one(tmp):
     assert human.endswith("first missing"), human
 
 
+def test_a_human_gap_beside_a_co_authored_bot_commit_exits_one(tmp):
+    """Only bot GAPS are exempt: a bot commit with a trailer excuses nothing."""
+    d, _hashes = _repo(tmp)
+    _commit_as(d, _ACTIONS,
+               "actions bump\n\nCo-Authored-By: Bot <bot@example.com>")
+    result, output, _error = _invoke(["-C", d])
+    assert result == 1, output
+    assert output.splitlines()[0] == "4 commits, 3 co-authored, 1 missing"
+
+
 def test_a_history_without_bots_prints_no_exemption(tmp):
     d, hashes = _repo(tmp)
     result, output, _error = _invoke(["--missing", "-C", d])
@@ -251,6 +261,8 @@ def test_a_history_without_bots_prints_no_exemption(tmp):
 def test_the_id_prefixed_bot_noreply_form_is_exempt(tmp):
     result, output, _error = _only_gap_by(tmp, _ACTIONS)
     assert result == 0, output
+    assert output.splitlines()[0] == (
+        "3 commits, 2 co-authored, 1 missing (1 bot-authored, exempt)"), output
 
 
 def test_the_bare_bot_noreply_form_is_exempt(tmp):
@@ -292,6 +304,43 @@ def test_a_non_numeric_noreply_prefix_is_gated(tmp):
         tmp, "github-actions[bot] <ci+github-actions[bot]"
         "@users.noreply.github.com>")
     assert result == 1, output
+
+
+def test_an_empty_noreply_id_prefix_is_gated(tmp):
+    result, output, _error = _only_gap_by(
+        tmp, "github-actions[bot] <+github-actions[bot]"
+        "@users.noreply.github.com>")
+    assert result == 1, output
+
+
+def test_an_empty_noreply_bot_name_is_gated(tmp):
+    result, output, _error = _only_gap_by(
+        tmp, "github-actions[bot] <[bot]@users.noreply.github.com>")
+    assert result == 1, output
+
+
+def test_a_name_with_bot_mid_name_is_gated(tmp):
+    result, output, _error = _only_gap_by(
+        tmp, "github-actions[bot] ci <41898282+github-actions[bot]"
+        "@users.noreply.github.com>")
+    assert result == 1, output
+
+
+# The two non-ASCII near misses call the predicate directly: a non-ASCII
+# `--author` would test the host's argv encoding, not this predicate.
+def test_a_non_ascii_digit_noreply_id_is_not_a_bot(_tmp):
+    assert _AS.is_bot_author(
+        "dependabot[bot]", "42+dependabot[bot]@users.noreply.github.com")
+    assert not _AS.is_bot_author(
+        "dependabot[bot]",
+        "٤٢+dependabot[bot]@users.noreply.github.com")
+
+
+def test_a_unicode_case_folded_noreply_domain_is_not_a_bot(_tmp):
+    assert _AS.is_bot_author(
+        "dependabot[bot]", "dependabot[bot]@users.noreply.GITHUB.com")
+    assert not _AS.is_bot_author(
+        "dependabot[bot]", "dependabot[bot]@users.noreply.gıthub.com")
 
 
 def test_a_bot_noreply_domain_near_miss_is_gated(tmp):
