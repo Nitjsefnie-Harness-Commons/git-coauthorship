@@ -1,10 +1,10 @@
 {
   "trees": {
-    "tests/": 1012
+    "tests/": 1008
   },
   "schema_version": 1,
   "baseline": {
-    "git_coauthorship/reauthor.py": 1052,
-    "tests/test_reauthor.py": 550
+    "git_coauthorship/reauthor.py": 1049,
+    "tests/test_reauthor.py": 523
   }
 }
