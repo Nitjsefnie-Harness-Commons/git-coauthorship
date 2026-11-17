@@ -6,6 +6,12 @@ name: codeql
 # Security tab rather than turning the build red, so a new query shipping
 # upstream cannot block an unrelated push.
 #
+# `push` fires on every branch, unlike the other gates: Scorecard's SAST
+# check asks whether a commit was analysed BEFORE it reached main. So a
+# pull request from this repository is skipped, its head already analysed
+# by that push, while a fork's pull request, whose head never pushes here,
+# is analysed.
+#
 # The weekly cron is not redundant with push: CodeQL's query packs are
 # updated continuously, and a new query only ever runs against code that
 # has changed since it shipped. Without the cron, a rule published today
@@ -31,6 +37,9 @@ concurrency:
 jobs:
   analyze:
     name: analyze (${{ matrix.language }})
+    # A skipped job's name is published unevaluated, so its check never
+    # takes the required `analyze (python)` name.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
