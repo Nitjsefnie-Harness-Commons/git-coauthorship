@@ -10,15 +10,11 @@ name: actionlint
 #   actionlint — is this workflow WELL-FORMED? Schema, expression syntax,
 #   context availability (`github.event.review` on a push event),
 #   `runs-on` labels, and shellcheck over every `run:` block, which is where
-#   most real bugs live. It found `for i in $(seq 1 30)` with an unused `i`
-#   in tests.yml on its first run here.
+#   most real bugs live.
 #
 #   zizmor — is this workflow SAFE? Script injection through `${{ }}` in a
 #   `run:` block, over-broad `permissions:`, credential persistence after
-#   checkout, unpinned action references. Its first run flagged 39 findings,
-#   14 of them high: every action was tag-pinned rather than hash-pinned,
-#   every checkout left the job token in .git/config, and no workflow
-#   declared permissions at all.
+#   checkout, unpinned action references.
 #
 # Both tools are pinned. actionlint is verified by checksum rather than
 # trusted from the release page, because a linter that runs before every
@@ -127,8 +123,8 @@ jobs:
 
       - name: zizmor
         # Runs even when actionlint is red, so one push reports both gates.
-        # Not when the install itself failed, which would report a tool bug
-        # as a clean audit.
+        # Only if the install succeeded: the runner image ships no zizmor,
+        # so the step could only fail.
         if: ${{ !cancelled() && steps.install_zizmor.outcome == 'success' }}
         env:
           # Enables the online audits (resolving action refs, checking for
