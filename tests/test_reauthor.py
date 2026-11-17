@@ -875,6 +875,7 @@ def _refused(d, *args):
 
 def test_all_refs_with_only_recent_is_refused(tmp):
     """--recent rebases HEAD only, so --all-refs would widen nothing."""
+    _require_git()
     d = _repo(os.path.join(tmp, "r"), OLD, OLD)
     _commit(d, OLD, OLD, "second")
     out = _refused(d, "--all-refs", "--recent", "1", *NEW)
@@ -883,6 +884,7 @@ def test_all_refs_with_only_recent_is_refused(tmp):
 
 
 def test_dry_run_still_scopes_rename_only(tmp):
+    _require_git()
     d = _repo(os.path.join(tmp, "r"), OLD, OLD)
     out = _refused(d, "--dry-run", *_MODES["--reauthor"])
     assert "ERROR: --dry-run currently scopes --rename only." in out, out

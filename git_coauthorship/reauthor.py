@@ -618,6 +618,8 @@ def scope_lines(mode, all_refs, refs, stop_full=None):
 
 
 def announce_scope(mode, all_refs, stop_full=None):
+    """Print `mode`'s scope line, then its untouched-refs note when
+    scope_lines gives one (it gives none for a whole-repository pass)."""
     refs = scope_refs(all_refs and stop_full is None)
     for line in scope_lines(mode, all_refs, refs, stop_full):
         if line:
@@ -1106,10 +1108,11 @@ def main():
                         all_refs=args.all_refs)
 
         if args.push:
-            # Plain --force, not --force-with-lease: git-filter-repo strips
-            # remote-tracking refs, so --force-with-lease bails with "stale
-            # info" every run. Since we just deliberately rewrote history
-            # locally, plain --force is the intended semantic.
+            # Plain --force, not --force-with-lease: a pass without --refs
+            # (--all-refs, no --stop-at) strips remote-tracking refs, so
+            # --force-with-lease bails with "stale info" there. Scoped passes
+            # keep them, but this one push serves every scope, and history
+            # was just rewritten on purpose: plain --force is intended.
             git("push", "origin", "HEAD", "--force")
             print("[push] Force-pushed.")
 
