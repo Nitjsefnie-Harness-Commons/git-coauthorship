@@ -63,6 +63,7 @@
 # ─── git_coauthorship ───
 !/git_coauthorship/
 !/git_coauthorship/__init__.py
+!/git_coauthorship/_scope.py
 !/git_coauthorship/author_stats.py
 !/git_coauthorship/reauthor.py
 
