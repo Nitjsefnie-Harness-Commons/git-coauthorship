@@ -1,6 +1,7 @@
 # Test-only toolchain, pinned with hashes for the full dependency tree so a
 # tool release cannot turn CI red on an unchanged commit (same reason as
-# requirements-dev.txt); CI installs with --require-hashes.
+# requirements-dev.txt); CI installs with --require-hashes, and
+# requirements-dev.txt says what Dependabot's bumps do and do not check.
 #
 # The SUITE itself needs nothing: each tests/ suite is a script of plain
 # functions that tests/_util.py collects and runs, launched by
@@ -21,8 +22,8 @@
 # found` (or `'_tmp'`). The speed comparator needs --junitxml, which only
 # pytest emits, so there is no timing harness to build the gate on.
 #
-# Resolved for CI's Linux and Python 3.13. Regenerate the pins below with:
-#   grep -oE '^coverage==[^ ]+' requirements-test.txt | uv pip compile - --generate-hashes --no-annotate --no-header --no-emit-package pip --python-version 3.13 --python-platform linux
+# Resolved for every platform on Python 3.13; regenerate with:
+#   grep -oE '^coverage==[^ ]+' requirements-test.txt | uv pip compile - --universal --generate-hashes --no-annotate --no-header --no-emit-package pip --python-version 3.13
 coverage==7.17.3 \
     --hash=sha256:0241e03dd65a1edf2e841eb19d8d72dca21ada5c869dcef6c9fde1b166d519a9 \
     --hash=sha256:0837b71a40749d9c4016cf8c51ba8c6153f7dd40cf4dfa287a2f28376fa50917 \

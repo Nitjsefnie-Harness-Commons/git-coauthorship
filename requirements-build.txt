@@ -1,16 +1,20 @@
 # build and the wheel-building backend pyproject.toml requires
 # (setuptools>=68), for tests.yml and release.yml. Versions and hashes
 # pinned for the full dependency tree, so release tooling changes only
-# through reviewed bumps; CI installs with --require-hashes, and Dependabot
-# keeps the versions and hashes current. CI builds with --no-isolation and
-# installs the project with --no-build-isolation, so no unpinned backend is
-# fetched into an isolated build environment.
+# through reviewed bumps; CI installs with --require-hashes, and
+# requirements-dev.txt says what Dependabot's bumps do and do not check.
+# CI builds with --no-isolation and installs the project with
+# --no-build-isolation, so no unpinned backend is fetched into an isolated
+# build environment.
 #
-# Resolved for CI's Linux and Python 3.13. Regenerate the pins below with:
-#   grep -oE '^(build|setuptools)==[^ ]+' requirements-build.txt | uv pip compile - --generate-hashes --no-annotate --no-header --no-emit-package pip --python-version 3.13 --python-platform linux
+# Resolved for every platform on Python 3.13; regenerate with:
+#   grep -oE '^(build|setuptools)==[^ ]+' requirements-build.txt | uv pip compile - --universal --generate-hashes --no-annotate --no-header --no-emit-package pip --python-version 3.13
 build==1.6.1 \
     --hash=sha256:51cc11666391ab6f092070437ac747002ff46f3e4113a3622177ee6b488bfc53 \
     --hash=sha256:ecd351a4be9d35a9eaaba244a7687143c9c7d4aea6ac964e7e7ddab20cbcf4e7
+colorama==0.4.6 ; os_name == 'nt' \
+    --hash=sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44 \
+    --hash=sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6
 packaging==26.3 \
     --hash=sha256:94edc256424af38762eb31306eed28beb9f0efc50a8837492c9d6fd6004aed79 \
     --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
