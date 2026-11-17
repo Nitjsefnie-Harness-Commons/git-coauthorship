@@ -11,9 +11,10 @@
 # only what ships.
 #
 # The keep list names FILES, not extensions. A `!/**/*.md` rule would be
-# shorter and would re-admit any note dropped into a directory this file
-# re-opens, though Markdown legitimately lives only in the repository root,
-# `.github/` and `.github/ISSUE_TEMPLATE/`.
+# shorter and would re-admit any note dropped at the root, `PERSONAL.md`
+# included, or into a directory this file re-opens, though Markdown
+# legitimately lives only in the repository root, `.github/` and
+# `.github/ISSUE_TEMPLATE/`.
 #
 # Git will not look inside a directory it has ignored, so each directory below
 # is re-opened before its files are named back.
