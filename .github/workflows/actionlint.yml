@@ -31,20 +31,22 @@ name: actionlint
 
 on:
   push:
-    paths:
-      - '.github/workflows/**'
-      - '.github/dependabot.yml'
+    # Default branch only: a pull-request head already gets its run from
+    # `pull_request`. No path filter, so a Markdown-only push to main is
+    # checked too.
+    branches: [main]
   pull_request:
-    paths:
-      - '.github/workflows/**'
-      - '.github/dependabot.yml'
+    # No path filter: a check that reports on only some pull requests cannot
+    # be required, since a required check that never reports blocks a merge.
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: actionlint-${{ github.ref }}
+  # A push run is keyed by its SHA, so one push to main never cancels
+  # another's; a pull request's newer head still cancels its older run.
+  group: actionlint-${{ github.event_name == 'push' && github.sha || github.ref }}
   cancel-in-progress: true
 
 jobs:
