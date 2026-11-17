@@ -25,9 +25,9 @@ name: actionlint
 # other gate is a supply-chain position worth defending.
 #
 # Suppressions belong at the offending line as a `# zizmor: ignore[rule]`
-# comment WITH a justification (see eslint.yml), never as a raised
-# --min-severity here: a threshold silences the next finding too, and the
-# next one is the one nobody has thought about yet.
+# comment WITH a justification, never as a raised --min-severity here: a
+# threshold silences the next finding too, and the next one is the one
+# nobody has thought about yet.
 
 on:
   push:
@@ -126,10 +126,9 @@ jobs:
         run: ./actionlint -color .github/workflows/*.yml
 
       - name: zizmor
-        # Runs even when actionlint is red, so one push reports both gates —
-        # the same pattern lint.yml uses for pylint/pycodestyle. Not when
-        # the install itself failed, which would report a tool bug as a
-        # clean audit.
+        # Runs even when actionlint is red, so one push reports both gates.
+        # Not when the install itself failed, which would report a tool bug
+        # as a clean audit.
         if: ${{ !cancelled() && steps.install_zizmor.outcome == 'success' }}
         env:
           # Enables the online audits (resolving action refs, checking for
