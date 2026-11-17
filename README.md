@@ -31,14 +31,14 @@ python3 run_tests.py                                             # the suite
 git ls-files -co --exclude-standard '*.py' | xargs pylint        # lint
 git ls-files -co --exclude-standard '*.py' | xargs pycodestyle   # lint
 pyright                                                          # types
-for m in requirements*.txt; do pip-audit --disable-pip -r $m; done # audit
+for m in requirements*.txt; do pip-audit --disable-pip -r "$m"; done # audit
 actionlint .github/workflows/*.yml && zizmor .github/workflows/  # workflows
 ```
 
 `pip install --require-hashes -r requirements-dev.txt`, then the same with
 `requirements-test.txt` (one manifest per command), gets the hash-pinned
-toolchain CI runs on Linux and Python 3.13; each CI tool has its own
-`requirements-*.txt`.
+toolchain CI runs, resolved for every platform on Python 3.13; each CI
+tool has its own `requirements-*.txt`.
 
 Use `-co --exclude-standard`, not a bare `git ls-files`: a brand-new
 module is untracked until you stage it, and pylint would otherwise report
