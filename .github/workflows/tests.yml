@@ -95,8 +95,8 @@ jobs:
   coverage:
     # A JOB of its own, not steps inside the matrix above: the matrix runs
     # every OS x Python pair, and coverage of the same code on each pair
-    # tells you the same number every time. One run, on one Python and the
-    # cheapest runner.
+    # tells you the same number every time. One run, on the Python every
+    # single-interpreter job here pins, and the cheapest runner.
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
