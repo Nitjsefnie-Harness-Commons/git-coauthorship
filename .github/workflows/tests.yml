@@ -151,9 +151,7 @@ jobs:
           # and a test that fails still executed the lines it reached. Every
           # suite failing is a different thing: it means nothing ran, and the
           # number below would describe no program at all. That is not a low
-          # coverage result to gate on, it is a broken job, and it has
-          # happened — an uninstalled runtime dependency killed every suite at
-          # import and the job reported 1%.
+          # coverage result to gate on, it is a broken job.
           if [ "$failed" -eq "${#suites[@]}" ]; then
             echo "every one of the ${#suites[@]} suites failed — refusing to" >&2
             echo "report a coverage number for a program that did not run." >&2
