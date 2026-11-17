@@ -66,12 +66,51 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Full history: the freshness and scope checks read main and the
+          # pushed range, and a history read inherits the checkout's depth.
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
           cache: pip
+
+      - name: Run the .github/scripts suites
+        # Before the steps below run those scripts.
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+
+      - name: Check no tracked file carries a merge-conflict marker
+        # A marker in Markdown reads like prose, so only a mechanical check
+        # sees it. The markers are matched in the shapes git writes them.
+        run: |
+          # git grep exits 1 for no match and above 1 for an error, which
+          # must not read as a clean tree.
+          found=0
+          git grep -nI -E '^(<{7}( |$)|>{7}( |$)|={7}$)' -- . || found=$?
+          if [ "$found" -gt 1 ]; then
+            echo "git grep exited $found, so no marker was looked for."
+            exit "$found"
+          fi
+          if [ "$found" -eq 0 ]; then
+            echo "A merge-conflict marker is committed. Resolve the conflict, rebase onto the target branch and push again."
+            exit 1
+          fi
+
+      - name: Require this head to carry main's gate-defining commits
+        # Strict required checks are off, so a green head vouches only for
+        # the tree it checked out; this is the check comparing it with main.
+        run: python3 .github/scripts/gate_base_freshness.py
+
+      - name: Refuse a commit whose scope names a workflow outside the ci type
+        # Only outgoing commits: a pull request or dispatch judges
+        # origin/main..HEAD; a push to main judges the commits it adds,
+        # before..HEAD, and refuses when there is no previous tip.
+        env:
+          GIT_COAUTHORSHIP_PUSH_BEFORE: ${{ github.event.before }}
+        run: python3 .github/scripts/commit_scopes.py
 
       - name: Install actionlint
         # Downloaded and checksum-verified rather than piped from the
