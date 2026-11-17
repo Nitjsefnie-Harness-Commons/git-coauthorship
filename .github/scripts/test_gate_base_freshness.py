@@ -148,7 +148,10 @@ class ThisRepository(Fixture):
         done = self.run_gate("--print-paths", cwd=ROOT)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout.splitlines(), [
-            ".github/workflows/actionlint.yml", ".github/workflows/audit.yml",
+            ".github/scripts/commit_scopes.py", ".github/scripts/gate_base_freshness.py",
+            ".github/scripts/publish_release.sh", ".github/scripts/test_commit_scopes.py",
+            ".github/scripts/test_gate_base_freshness.py",
+            ".github/scripts/test_publish_release.py", ".github/workflows/actionlint.yml", ".github/workflows/audit.yml",
             ".github/workflows/codeql.yml", ".github/workflows/lint.yml",
             ".github/workflows/release.yml", ".github/workflows/tag.yml",
             ".github/workflows/tests.yml", ".github/workflows/types.yml",
