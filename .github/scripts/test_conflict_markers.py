@@ -35,6 +35,13 @@ class ConflictMarkers(unittest.TestCase):
                 self.assertIn("README.md:3:" + marker.decode(), done.stdout)
                 self.assertIn("A merge-conflict marker is committed.", done.stdout)
 
+    def test_a_marker_in_a_nested_file_is_refused(self) -> None:
+        (self.repo / "docs").mkdir()
+        self.track("docs/x.md", b"# doc\n\n=======\nprose\n")
+        done = self.run_script(self.repo)
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("docs/x.md:3:=======", done.stdout)
+
     def test_a_tree_without_a_marker_passes(self) -> None:
         near_misses = b"<<<<<<<x\n========\n>>>>>>>>\n ======= \n<<<<<< HEAD\n"
         self.track("README.md", b"# doc\n" + near_misses)
