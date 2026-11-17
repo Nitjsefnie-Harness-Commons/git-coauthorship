@@ -78,8 +78,8 @@ class ThisRepository(Fixture):
     def test_names_derived_from_this_repository(self) -> None:
         self.assertEqual(scopes.workflow_name_set(ROOT), {
             "actionlint", "audit", "claim", "codeql", "comment share", "lint",
-            "pin test screen", "pr gate", "release", "secrets", "size baseline", "tag", "tests",
-            "types"})
+            "pin test screen", "pr gate", "release", "scorecard", "secrets", "size baseline", "tag",
+            "tests", "types"})
 
     def test_the_workflow_hands_the_push_tip_under_the_name_the_check_reads(self) -> None:
         lines = git(ROOT, "show", "HEAD:.github/workflows/actionlint.yml").splitlines()
