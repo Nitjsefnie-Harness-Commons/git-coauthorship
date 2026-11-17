@@ -30,6 +30,8 @@ on:
     - cron: '47 3 * * 3'
   workflow_dispatch:
 
+permissions: {}
+
 concurrency:
   group: codeql-${{ github.ref }}
   cancel-in-progress: true
