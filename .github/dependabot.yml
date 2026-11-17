@@ -13,14 +13,25 @@ updates:
       time: "04:30"
       timezone: Etc/UTC
     open-pull-requests-limit: 5
-    # `include: scope` adds the classification. A requirements file whose
-    # name contains "dev" counts as development: requirements-dev.txt bumps
-    # read `ci(deps-dev): ...`, requirements-test.txt bumps `ci(deps): ...`.
+    # `include: scope` adds the classification: `ci(deps-dev): ...` only
+    # when every bump is in requirements-dev.txt ("dev" in the name).
     commit-message:
       prefix: ci
       include: scope
     labels:
       - dependencies
+    # Bumps are checked only against the Python version, so pins that move
+    # together share one pull request. A group cannot lift a parent's bound
+    # (pylint's isort<10 refuses isort 10): regenerate with the manifest
+    # header's command.
+    groups:
+      version-updates:
+        patterns:
+          - "*"
+      security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
 
   # Actions are SHA-pinned (jobs hold a repository token); without
   # Dependabot those pins never move.

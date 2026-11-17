@@ -1,15 +1,21 @@
 # Lint / type toolchain, mirroring the house set. Versions and hashes pinned
 # for the full dependency tree, so a tool release cannot turn CI red on an
-# unchanged commit; CI installs with --require-hashes, and Dependabot keeps
-# the versions and hashes current. The package and suites are
-# standard-library only; git-filter-repo is optional for a handful of
-# end-to-end rewrite tests and is never installed by the wheel.
+# unchanged commit. The package and suites are standard-library only;
+# git-filter-repo is optional for a handful of end-to-end rewrite tests and
+# is never installed by the wheel.
 #
-# Resolved for CI's Linux and Python 3.13. Regenerate the pins below with:
-#   grep -oE '^(pycodestyle|pylint|pyright)==[^ ]+' requirements-dev.txt | uv pip compile - --generate-hashes --no-annotate --no-header --no-emit-package pip --python-version 3.13 --python-platform linux
+# CI installs with --require-hashes. Dependabot bumps the versions and
+# hashes in one grouped pull request, checking each only against the Python
+# version; when the newest versions do not fit each other's bounds, or one
+# needs a dependency this file lacks, that install fails until the pins are
+# regenerated. Resolved for every platform on Python 3.13; regenerate with:
+#   grep -oE '^(pycodestyle|pylint|pyright)==[^ ]+' requirements-dev.txt | uv pip compile - --universal --generate-hashes --no-annotate --no-header --no-emit-package pip --python-version 3.13
 astroid==4.3.4 \
     --hash=sha256:2bcd0d02648a443a4b818c952c3550091989daefac3c12d3b83b2289482e0818 \
     --hash=sha256:d515a105722b72098bbe82d430d65e635f742b6cbac3bdfaf8b7c188b87c5e39
+colorama==0.4.6 ; sys_platform == 'win32' \
+    --hash=sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44 \
+    --hash=sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6
 dill==0.4.1 \
     --hash=sha256:1e1ce33e978ae97fcfcff5638477032b801c46c7c65cf717f95fbc2248f79a9d \
     --hash=sha256:423092df4182177d4d8ba8290c8a5b640c66ab35ec7da59ccfa00f6fa3eea5fa

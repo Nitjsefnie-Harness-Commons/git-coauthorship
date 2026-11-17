@@ -1,10 +1,10 @@
 # zizmor, for actionlint.yml: workflow security checks must stay
 # reproducible between reviewed bumps. Versions and hashes pinned for the
-# full dependency tree; CI installs with --require-hashes, and Dependabot
-# keeps the versions and hashes current.
+# full dependency tree; CI installs with --require-hashes, and
+# requirements-dev.txt says what Dependabot's bumps do and do not check.
 #
-# Resolved for CI's Linux and Python 3.13. Regenerate the pins below with:
-#   grep -oE '^zizmor==[^ ]+' requirements-zizmor.txt | uv pip compile - --generate-hashes --no-annotate --no-header --no-emit-package pip --python-version 3.13 --python-platform linux
+# Resolved for every platform on Python 3.13; regenerate with:
+#   grep -oE '^zizmor==[^ ]+' requirements-zizmor.txt | uv pip compile - --universal --generate-hashes --no-annotate --no-header --no-emit-package pip --python-version 3.13
 zizmor==1.29.0 \
     --hash=sha256:061600f23c46f2e400bcdef666c236de7e5c0b07dd6ca046daa001eb1514b909 \
     --hash=sha256:0fb85948ba5ffc7a8116eee36fe9cfc10167225c97bd2810e3378e66a9fd27c4 \

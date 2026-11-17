@@ -1,12 +1,12 @@
 # pip-audit, for audit.yml: audit results must depend on advisories, not an
 # unreviewed tool release. Versions and hashes pinned for the full
-# dependency tree; CI installs with --require-hashes, and Dependabot keeps
-# the versions and hashes current. pip-api uses the installer's existing
-# pip, kept out of this manifest so installing the audit tool never upgrades
-# the installer.
+# dependency tree; CI installs with --require-hashes, and
+# requirements-dev.txt says what Dependabot's bumps do and do not check.
+# pip-api uses the installer's existing pip, kept out of this manifest so
+# installing the audit tool never upgrades the installer.
 #
-# Resolved for CI's Linux and Python 3.13. Regenerate the pins below with:
-#   grep -oE '^pip-audit==[^ ]+' requirements-audit.txt | uv pip compile - --generate-hashes --no-annotate --no-header --no-emit-package pip --python-version 3.13 --python-platform linux
+# Resolved for every platform on Python 3.13; regenerate with:
+#   grep -oE '^pip-audit==[^ ]+' requirements-audit.txt | uv pip compile - --universal --generate-hashes --no-annotate --no-header --no-emit-package pip --python-version 3.13
 boolean-py==5.0 \
     --hash=sha256:60cbc4bad079753721d32649545505362c754e121570ada4658b852a3a318d95 \
     --hash=sha256:ef28a70bd43115208441b53a045d1549e2f0ec6e3d08a9d142cbc41c1938e8d9
