@@ -29,16 +29,14 @@ GitHub-style `Co-authored-by:` counts as co-authored — unlike
 `reauthor.py`'s strict `Co-Authored-By:` check, whose job is
 "would --recent touch this", not "is this commit compliant".
 
-A commit GitHub automation authored (github-actions[bot], dependabot[bot])
-is outside the co-author rule: its author name ends with `[bot]` and its
-email is GitHub's bot noreply address,
-`[<id>+]<name>[bot]@users.noreply.github.com`. It stays in every tally, and
-the summary and the `--missing` list mark it exempt.
+A GitHub bot's commit (author `<name>[bot]`, email
+`[<id>+]<name>[bot]@users.noreply.github.com`) is exempt from the co-author
+rule but stays in every tally, marked exempt in the summary and the
+`--missing` list.
 
-Exit status: 0 if every commit in range that is not bot-authored carries a
-`Co-Authored-By:` trailer, 1 if any of those is missing one, 2 on error
-(no git, not a repo, bad range). The 0/1 split lets this gate a pre-push
-hook or CI step.
+Exit status: 0 if every non-bot commit in range is co-authored, 1 if any
+is not, 2 on error (no git, not a repo, bad range). The 0/1 split lets this
+gate a pre-push hook or CI step.
 
 Examples
 --------
@@ -142,10 +140,9 @@ def tally_authors(records):
 
 
 def is_bot_author(name, email):
-    """True when both the name and the email are a GitHub bot's.
-
-    Either alone is not enough: anyone can name themselves `x[bot]`, and a
-    bot address under another name is not the automation committing."""
+    """Both the name and the email must be a GitHub bot's: anyone can name
+    themselves `x[bot]`, and a bot address under another name is not the
+    automation committing."""
     return name.endswith("[bot]") and _BOT_EMAIL.fullmatch(email) is not None
 
 
