@@ -128,7 +128,7 @@ def test_main_summary_reports_tallies_and_missing_status(tmp):
     result, output, error = _invoke(["-C", d])
     assert result == 1
     assert not error
-    assert "3 commits, 2 co-authored, 1 missing" in output
+    assert output.splitlines()[0] == "3 commits, 2 co-authored, 1 missing"
     assert "By author (1 distinct; the git author field):" in output
     assert "By trailer (commits; a commit may carry more than one):" in output
     assert "(none)" in output
@@ -147,35 +147,6 @@ def test_main_list_reports_every_commit_and_multi_trailer_count(tmp):
     assert output.count("  ") > 3
 
 
-def test_main_missing_reports_only_missing_commits(tmp):
-    d, hashes = _repo(tmp)
-    result, output, error = _invoke(["--missing", "-C", d])
-    assert result == 1
-    assert not error
-    section = output.split("MISSING TRAILER:", 1)[1]
-    assert hashes[0][:9] in section
-    assert "first missing" in section
-    assert hashes[1][:9] not in section
-    assert "second lower-case trailer" not in section
-
-
-def test_main_list_and_missing_modes_are_independent(tmp):
-    d, _hashes = _repo(tmp)
-    result, output, error = _invoke(["--list", "--missing", "-C", d])
-    assert result == 1
-    assert not error
-    assert "ALL COMMITS:" in output
-    assert "MISSING TRAILER:" in output
-
-
-def test_main_accepts_revision_range_and_returns_zero_when_complete(tmp):
-    d, hashes = _repo(tmp)
-    result, output, error = _invoke([f"{hashes[0]}..HEAD", "-C", d])
-    assert result == 0
-    assert not error
-    assert "2 commits, 2 co-authored, 0 missing" in output
-
-
 def test_main_reports_empty_revision_range_as_success(tmp):
     d, hashes = _repo(tmp)
     result, output, error = _invoke([f"{hashes[0]}..{hashes[0]}", "-C", d])
@@ -184,10 +155,8 @@ def test_main_reports_empty_revision_range_as_success(tmp):
     assert output.strip() == "No commits in range."
 
 
-_ACTIONS = ("github-actions[bot] <41898282+github-actions[bot]"
-            "@users.noreply.github.com>")
-_DEPENDABOT = ("dependabot[bot] <49699333+dependabot[bot]"
-               "@users.noreply.github.com>")
+_ACTIONS = "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+_DEPENDABOT = "dependabot[bot] <dependabot[bot]@users.noreply.github.com>"
 
 
 def _commit_as(d, author, message):
@@ -198,165 +167,53 @@ def _commit_as(d, author, message):
     return _git(d, "rev-parse", "HEAD").stdout.strip()
 
 
-def _only_gap_by(tmp, author):
-    """Exit status and output for a range whose one gap is `author`'s."""
+def test_bot_gaps_are_counted_and_marked_but_only_a_human_gap_fails(tmp):
+    """A complete range exits 0. The id-prefixed and bare noreply forms exempt
+    their gap and stay in every tally; a human gap still exits 1 beside bot
+    gaps, a co-authored bot commit and a bot address under a name lacking
+    `[bot]`, and `--missing` lists no co-authored commit."""
     d, hashes = _repo(tmp)
-    _commit_as(d, author, "automated bump")
-    return _invoke([f"{hashes[0]}..HEAD", "-C", d])
+    result, output, error = _invoke([f"{hashes[0]}..HEAD", "-C", d])
+    assert (result, error) == (0, "") and "2 commits, 2 co-authored, 0 missing" in output, output
+    bots = [_commit_as(d, who, "bump") for who in (_ACTIONS, _DEPENDABOT)]
+    result, output, _error = _invoke([f"{hashes[0]}..{bots[0]}", "-C", d])
+    assert (result, output.splitlines()[0]) == (
+        0, "3 commits, 2 co-authored, 1 missing (1 bot-authored, exempt)"), output
+    result, output, error = _invoke([f"{hashes[0]}..HEAD", "--list", "--missing", "-C", d])
+    assert (result, error, output.splitlines()[0]) == (
+        0, "", "4 commits, 2 co-authored, 2 missing (2 bot-authored, exempt)"), output
+    for line in (f"      1  {_ACTIONS}", f"      1  {_DEPENDABOT}", "      2  (none)"):
+        assert line in output, output
+    listed, missing = output.split("ALL COMMITS:", 1)[1].split("MISSING TRAILER:")
+    for h in bots:
+        assert "MISSING" in next(x for x in listed.splitlines() if h[:9] in x), listed
+        assert next(x for x in missing.splitlines() if h[:9] in x).endswith(
+            "(bot-authored, exempt)"), missing
+    _commit_as(d, _ACTIONS, "bump\n\nCo-Authored-By: Bot <bot@example.com>")
+    _commit_as(d, _ACTIONS.replace("[bot] <", " <"), "spoof")
+    result, output, error = _invoke(["--missing", "-C", d])
+    assert (result, error, output.splitlines()[0]) == (
+        1, "", "7 commits, 3 co-authored, 4 missing (2 bot-authored, exempt)"), output
+    section = output.split("MISSING TRAILER:", 1)[1]
+    assert next(x for x in section.splitlines() if hashes[0][:9] in x).endswith(
+        "first missing"), output
+    assert hashes[1][:9] not in section and "second lower-case trailer" not in section, output
 
 
-def test_bot_only_gaps_exit_zero_and_stay_in_every_tally(tmp):
-    d, hashes = _repo(tmp)
-    bot_hashes = [_commit_as(d, _ACTIONS, "actions bump"),
-                  _commit_as(d, _DEPENDABOT, "dependabot bump")]
-    result, output, error = _invoke(
-        [f"{hashes[0]}..HEAD", "--list", "--missing", "-C", d])
-    assert result == 0, output
-    assert not error
-    assert output.splitlines()[0] == (
-        "4 commits, 2 co-authored, 2 missing (2 bot-authored, exempt)"), output
-    assert f"      1  {_ACTIONS}" in output, output
-    assert f"      1  {_DEPENDABOT}" in output, output
-    assert "      2  (none)" in output, output
-    listed = output.split("ALL COMMITS:", 1)[1].split("MISSING TRAILER:")[0]
-    missing = output.split("MISSING TRAILER:", 1)[1]
-    for h in bot_hashes:
-        assert "MISSING" in next(line for line in listed.splitlines()
-                                 if h[:9] in line), listed
-        assert next(line for line in missing.splitlines()
-                    if h[:9] in line).endswith("(bot-authored, exempt)"), missing
-
-
-def test_a_human_gap_beside_bot_gaps_exits_one(tmp):
-    d, hashes = _repo(tmp)
-    _commit_as(d, _ACTIONS, "actions bump")
-    _commit_as(d, _DEPENDABOT, "dependabot bump")
-    result, output, _error = _invoke(["--missing", "-C", d])
-    assert result == 1, output
-    assert output.splitlines()[0] == (
-        "5 commits, 2 co-authored, 3 missing (2 bot-authored, exempt)"), output
-    human = next(line for line in output.split("MISSING TRAILER:", 1)[1]
-                 .splitlines() if hashes[0][:9] in line)
-    assert human.endswith("first missing"), human
-
-
-def test_a_human_gap_beside_a_co_authored_bot_commit_exits_one(tmp):
-    """Only bot GAPS are exempt: a bot commit with a trailer excuses nothing."""
-    d, _hashes = _repo(tmp)
-    _commit_as(d, _ACTIONS,
-               "actions bump\n\nCo-Authored-By: Bot <bot@example.com>")
-    result, output, _error = _invoke(["-C", d])
-    assert result == 1, output
-    assert output.splitlines()[0] == "4 commits, 3 co-authored, 1 missing"
-
-
-def test_a_history_without_bots_prints_no_exemption(tmp):
-    d, hashes = _repo(tmp)
-    result, output, _error = _invoke(["--missing", "-C", d])
-    assert result == 1
-    assert output.splitlines()[0] == "3 commits, 2 co-authored, 1 missing"
-    assert "bot-authored" not in output, output
-    assert next(line for line in output.splitlines()
-                if hashes[0][:9] in line).endswith("first missing"), output
-
-
-def test_the_id_prefixed_bot_noreply_form_is_exempt(tmp):
-    result, output, _error = _only_gap_by(tmp, _ACTIONS)
-    assert result == 0, output
-    assert output.splitlines()[0] == (
-        "3 commits, 2 co-authored, 1 missing (1 bot-authored, exempt)"), output
-
-
-def test_the_bare_bot_noreply_form_is_exempt(tmp):
-    result, output, _error = _only_gap_by(
-        tmp, "dependabot[bot] <dependabot[bot]@users.noreply.github.com>")
-    assert result == 0, output
-
-
-def test_the_bot_noreply_domain_is_compared_case_blind(tmp):
-    result, output, _error = _only_gap_by(
-        tmp, "dependabot[bot] <49699333+dependabot[bot]"
-        "@Users.NoReply.GitHub.com>")
-    assert result == 0, output
-
-
-def test_a_bot_name_with_a_non_noreply_email_is_gated(tmp):
-    result, output, _error = _only_gap_by(
-        tmp, "github-actions[bot] <ci@example.com>")
-    assert result == 1, output
-
-
-def test_a_bot_noreply_email_under_a_name_lacking_bot_is_gated(tmp):
-    result, output, _error = _only_gap_by(
-        tmp, "github-actions <41898282+github-actions[bot]"
-        "@users.noreply.github.com>")
-    assert result == 1, output
-
-
-def test_a_person_noreply_email_under_a_bot_name_is_gated(tmp):
-    """A user's own noreply address has no `[bot]` in its local part."""
-    result, output, _error = _only_gap_by(
-        tmp, "github-actions[bot] <41898282+github-actions"
-        "@users.noreply.github.com>")
-    assert result == 1, output
-
-
-def test_a_non_numeric_noreply_prefix_is_gated(tmp):
-    result, output, _error = _only_gap_by(
-        tmp, "github-actions[bot] <ci+github-actions[bot]"
-        "@users.noreply.github.com>")
-    assert result == 1, output
-
-
-def test_an_empty_noreply_id_prefix_is_gated(tmp):
-    result, output, _error = _only_gap_by(
-        tmp, "github-actions[bot] <+github-actions[bot]"
-        "@users.noreply.github.com>")
-    assert result == 1, output
-
-
-def test_an_upper_case_bot_tag_in_the_noreply_email_is_gated(tmp):
-    """Only the domain is compared case-blind; the `[bot]` tag is exact."""
-    result, output, _error = _only_gap_by(
-        tmp, "dependabot[bot] <dependabot[BOT]@users.noreply.github.com>")
-    assert result == 1, output
-
-
-def test_an_empty_noreply_bot_name_is_gated(tmp):
-    result, output, _error = _only_gap_by(
-        tmp, "github-actions[bot] <[bot]@users.noreply.github.com>")
-    assert result == 1, output
-
-
-def test_a_name_with_bot_mid_name_is_gated(tmp):
-    result, output, _error = _only_gap_by(
-        tmp, "github-actions[bot] ci <41898282+github-actions[bot]"
-        "@users.noreply.github.com>")
-    assert result == 1, output
-
-
-# The two non-ASCII near misses call the predicate directly: a non-ASCII
-# `--author` would test the host's argv encoding, not this predicate.
-def test_a_non_ascii_digit_noreply_id_is_not_a_bot(_tmp):
-    assert _AS.is_bot_author(
-        "dependabot[bot]", "42+dependabot[bot]@users.noreply.github.com")
-    assert not _AS.is_bot_author(
-        "dependabot[bot]",
-        "\u0664\u0662+dependabot[bot]@users.noreply.github.com")
-
-
-def test_a_unicode_case_folded_noreply_domain_is_not_a_bot(_tmp):
-    assert _AS.is_bot_author(
-        "dependabot[bot]", "dependabot[bot]@users.noreply.GITHUB.com")
-    assert not _AS.is_bot_author(
-        "dependabot[bot]", "dependabot[bot]@users.noreply.g\u0131thub.com")
-
-
-def test_a_bot_noreply_domain_near_miss_is_gated(tmp):
-    result, output, _error = _only_gap_by(
-        tmp, "github-actions[bot] <41898282+github-actions[bot]"
-        "@users.noreply.github.com.example>")
-    assert result == 1, output
+def test_a_bot_is_a_bot_name_with_a_bot_noreply_address(_tmp):
+    """A member, then one near miss per part of the rule. The predicate is
+    called directly: a non-ASCII `--author` would test the host's argv
+    encoding, not the rule."""
+    for name, email, bot in (
+            ("dependabot[bot]", "42+dependabot[bot]@users.noreply.GitHub.com", True),
+            ("dependabot[bot] ci", "42+dependabot[bot]@users.noreply.github.com", False),
+            ("dependabot[bot]", "42+dependabot[BOT]@users.noreply.github.com", False),
+            ("dependabot[bot]", "42+[bot]@users.noreply.github.com", False),
+            ("dependabot[bot]", "+dependabot[bot]@users.noreply.github.com", False),
+            ("dependabot[bot]", "\u0664\u0662+dependabot[bot]@users.noreply.github.com", False),
+            ("dependabot[bot]", "42+dependabot[bot]@users.noreply.g\u0131thub.com", False),
+            ("dependabot[bot]", "42+dependabot[bot]@users.noreply.github.com.example", False)):
+        assert _AS.is_bot_author(name, email) is bot, (name, email)
 
 
 def test_main_exits_two_for_an_invalid_revision_range(tmp):
