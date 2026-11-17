@@ -75,6 +75,7 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
+          cache-dependency-path: requirements-zizmor.txt
 
       - name: Run the .github/scripts suites
         # Before the steps below run those scripts.
@@ -114,9 +115,7 @@ jobs:
 
       - name: Install zizmor
         id: install_zizmor
-        run: |
-          python -m pip install --upgrade pip
-          pip install zizmor==1.29.0
+        run: python -m pip install --require-hashes -r requirements-zizmor.txt
 
       - name: actionlint
         id: actionlint

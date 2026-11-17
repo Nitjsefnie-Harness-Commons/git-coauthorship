@@ -33,6 +33,7 @@
 !/requirements-build.txt
 !/requirements-dev.txt
 !/requirements-test.txt
+!/requirements-zizmor.txt
 !/run_tests.py
 !/setup.cfg
 
