@@ -23,15 +23,16 @@ name: tag
 # main green. A push leaving an already-tagged version unchanged ends green
 # before the wait. Re-running a bump commit's failed gates creates no push,
 # so no run. A bump whose run went red on checks a newer push cancelled is
-# tagged at the newer tip by that push's run, once its checks pass; to tag
-# the bump commit itself while untagged, re-run its gates green, then
-# dispatch with its `sha`.
+# tagged at the newer tip by that push's run, once the tip's checks pass; to
+# tag the bump commit itself while its version is still untagged, re-run its
+# gates green, then dispatch with its `sha`.
 
 on:
   push:
     branches: [main]
-    # The gates' own ignore list: a push they skip has no check runs, and
-    # the wait would time out red.
+    # The gates' own ignore list: they skip such a push, so its commit has
+    # no suite, lint or type results, and tagging it would release a commit
+    # those gates never checked.
     paths-ignore:
       - '**/*.md'
       - 'LICENSE'
