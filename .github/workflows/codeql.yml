@@ -6,11 +6,9 @@ name: codeql
 # Security tab rather than turning the build red, so a new query shipping
 # upstream cannot block an unrelated push.
 #
-# `push` fires on every branch and every path, unlike the other gates:
-# Scorecard's SAST check asks whether a commit was analysed BEFORE it
-# reached main. So a pull request from this repository is skipped, as its
-# head's push already published `analyze (python)`, while a fork's pull
-# request, whose head never pushes here, is analysed.
+# Unlike the other gates, `push` fires on every branch and path:
+# Scorecard's SAST check wants each commit analysed before main, and an
+# in-repo pull request, skipped below, relies on its head's push run.
 #
 # The weekly cron is not redundant with push: CodeQL's query packs are
 # updated continuously, and a new query only ever runs against code that
@@ -18,7 +16,6 @@ name: codeql
 # would never be applied to a file last touched last year.
 
 on:
-  # No path filter: a skipped in-repo pull request needs this run's check.
   push:
   pull_request:
   schedule:
@@ -51,8 +48,7 @@ jobs:
       contents: read
 
     strategy:
-      # `actions` for the workflows, `python` for the package; each lands
-      # as its own check through the job name and `category:`.
+      # `actions` for the workflows, `python` for the package.
       fail-fast: false
       matrix:
         include:
