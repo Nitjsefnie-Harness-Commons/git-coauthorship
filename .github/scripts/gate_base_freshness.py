@@ -209,6 +209,17 @@ def apply_field(lines: list[str], end: int, key: str, value: str, at: int,
         step["run"] = value
     elif key == "uses":
         step["uses"] = value.split()[0] if value else None
+    elif key == "with":
+        if value:
+            raise WorkflowError(
+                f"{workflow}: `with: {value}` is a flow mapping; this reader models "
+                f"only the block form, whose values may name files")
+        after = block_end(lines, at, 8)
+        # Values only: an input's name is not a path, its value may be.
+        step["with"] = "\n".join(
+            ((match["value"] or "") if (match := MAPPING.match(line.strip())) else "")
+            if indent_of(line) == 10 else line for line in lines[at + 1:after])
+        return after
     elif key == "working-directory":
         if not value or BLOCK_SCALAR.match(value) or "${{" in value:
             raise WorkflowError(
@@ -224,7 +235,7 @@ def apply_field(lines: list[str], end: int, key: str, value: str, at: int,
 def step_fields(lines: list[str], name: str, start: int, end: int,
                 workflow: str, dash: str) -> Step:
     # `dash`, the text after the step's `- `, is its first key.
-    step: Step = {"run": None, "uses": None, "dir": None}
+    step: Step = {"run": None, "uses": None, "dir": None, "with": None}
     index = start
     if dash:
         match = MAPPING.match(dash)
@@ -310,6 +321,8 @@ def gate_paths(root: Path) -> list[str]:
                     if step["dir"]:
                         derived.update(resolve(posixpath.normpath(
                             f"{step['dir']}/{candidate}"), files))
+                for candidate in candidates(step["with"] or ""):
+                    derived.update(resolve(candidate, files))
     if not derived:
         raise GateError(
             "the required checks name no file in this tree, so there is nothing "
