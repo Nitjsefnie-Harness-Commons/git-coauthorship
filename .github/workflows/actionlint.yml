@@ -85,19 +85,7 @@ jobs:
       - name: Check no tracked file carries a merge-conflict marker
         # A marker in Markdown reads like prose, so only a mechanical check
         # sees it. The markers are matched in the shapes git writes them.
-        run: |
-          # git grep exits 1 for no match and above 1 for an error, which
-          # must not read as a clean tree.
-          found=0
-          git grep -nI -E '^(<{7}( |$)|>{7}( |$)|={7}$)' -- . || found=$?
-          if [ "$found" -gt 1 ]; then
-            echo "git grep exited $found, so no marker was looked for."
-            exit "$found"
-          fi
-          if [ "$found" -eq 0 ]; then
-            echo "A merge-conflict marker is committed. Resolve the conflict, rebase onto the target branch and push again."
-            exit 1
-          fi
+        run: bash .github/scripts/conflict_markers.sh
 
       - name: Require this head to carry main's gate-defining commits
         # Strict required checks are off, so a green head vouches only for
