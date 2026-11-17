@@ -72,16 +72,17 @@ def _commit(d, author, committer, text):
 
 def _idents(d):
     """-> (author_name, author_email, committer_name, committer_email)."""
-    out = subprocess.check_output(
-        ["git", "-C", d, "log", "-1", "--format=%an%x00%ae%x00%cn%x00%ce"],
-        timeout=60).decode().strip()
-    return tuple(out.split("\x00"))
+    return tuple(_out(d, "log", "-1", "--format=%an%x00%ae%x00%cn%x00%ce").split("\x00"))
+
+
+def _out(d, *args, env=None):
+    """git's stripped stdout in `d`; raises when git fails."""
+    return subprocess.check_output(["git", "-C", d, *args], env=env,
+                                   timeout=60).decode().strip()
 
 
 def _head(d):
-    return subprocess.check_output(
-        ["git", "-C", d, "rev-parse", "HEAD"], timeout=60
-    ).decode().strip()
+    return _out(d, "rev-parse", "HEAD")
 
 
 def _add_fake_signature(d):
@@ -169,9 +170,7 @@ def test_stop_at_preserves_a_signed_boundary_object(tmp):
         ["git", "-C", d, "cat-file", "commit", boundary], timeout=60)
     assert after == boundary_bytes
     assert b"gpgsig " in after
-    assert subprocess.check_output(
-        ["git", "-C", d, "rev-parse", "HEAD^"], timeout=60
-    ).decode().strip() == boundary
+    assert _out(d, "rev-parse", "HEAD^") == boundary
     assert _idents(d)[:2] == ("Nitjsefnie", "z@example.com")
 
 
@@ -183,49 +182,29 @@ def test_identity_rewrite_restores_current_branch_upstream(tmp):
     push_remote = os.path.join(tmp, "push.git")
     subprocess.run(["git", "init", "--bare", "-q", remote], check=True)
     subprocess.run(["git", "init", "--bare", "-q", push_remote], check=True)
-    subprocess.run(["git", "-C", d, "remote", "add", "origin", remote],
-                   check=True)
-    subprocess.run(["git", "-C", d, "push", "-q", "-u", "origin", "main"],
-                   check=True)
-    subprocess.run(
-        ["git", "-C", d, "remote", "set-url", "--push", "origin",
-         push_remote], check=True)
+    _out(d, "remote", "add", "origin", remote)
+    _out(d, "push", "-q", "-u", "origin", "main")
+    _out(d, "remote", "set-url", "--push", "origin", push_remote)
     extra_fetch = "+refs/pull/*:refs/remotes/origin/pull/*"
-    subprocess.run(
-        ["git", "-C", d, "config", "--add", "remote.origin.fetch",
-         extra_fetch], check=True)
-    fetch_before = subprocess.check_output(
-        ["git", "-C", d, "config", "--get-all", "remote.origin.fetch"],
-        timeout=60).decode().splitlines()
+    _out(d, "config", "--add", "remote.origin.fetch", extra_fetch)
+    fetch_before = _out(d, "config", "--get-all", "remote.origin.fetch").splitlines()
 
     _reauthor(d, "--reauthor", "Peter Z", "p@example.com",
               "Nitjsefnie", "z@example.com")
 
-    remote_name = subprocess.check_output(
-        ["git", "-C", d, "config", "--get", "branch.main.remote"],
-        timeout=60).decode().strip()
-    merge_ref = subprocess.check_output(
-        ["git", "-C", d, "config", "--get", "branch.main.merge"],
-        timeout=60).decode().strip()
+    remote_name = _out(d, "config", "--get", "branch.main.remote")
+    merge_ref = _out(d, "config", "--get", "branch.main.merge")
     assert remote_name == "origin", remote_name
     assert merge_ref == "refs/heads/main", merge_ref
-    assert subprocess.check_output(
-        ["git", "-C", d, "remote", "get-url", "origin"], timeout=60
-    ).decode().strip() == remote
-    assert subprocess.check_output(
-        ["git", "-C", d, "remote", "get-url", "--push", "origin"],
-        timeout=60).decode().strip() == push_remote
-    fetch_after = subprocess.check_output(
-        ["git", "-C", d, "config", "--get-all", "remote.origin.fetch"],
-        timeout=60).decode().splitlines()
+    assert _out(d, "remote", "get-url", "origin") == remote
+    assert _out(d, "remote", "get-url", "--push", "origin") == push_remote
+    fetch_after = _out(d, "config", "--get-all", "remote.origin.fetch").splitlines()
     assert fetch_after == fetch_before
     push = subprocess.run(
         ["git", "-C", d, "push", "--force"], capture_output=True, text=True,
         check=False, timeout=60)
     assert push.returncode == 0, push.stderr
-    assert subprocess.check_output(
-        ["git", "-C", push_remote, "rev-parse", "refs/heads/main"],
-        timeout=60).decode().strip() == _head(d)
+    assert _out(push_remote, "rev-parse", "refs/heads/main") == _head(d)
 
 
 def test_restore_does_not_copy_global_remote_values_into_local_config(tmp):
@@ -234,30 +213,22 @@ def test_restore_does_not_copy_global_remote_values_into_local_config(tmp):
               ("Human", "human@example.com"))
     local_url = os.path.join(tmp, "local.git")
     global_url = os.path.join(tmp, "global.git")
-    subprocess.run(["git", "-C", d, "remote", "add", "origin", local_url],
-                   check=True)
+    _out(d, "remote", "add", "origin", local_url)
     global_config = os.path.join(tmp, "global.gitconfig")
     subprocess.run(
         ["git", "config", "--file", global_config, "--add",
          "remote.origin.url", global_url], check=True)
     env = {**os.environ, "GIT_CONFIG_GLOBAL": global_config,
            "GIT_CONFIG_NOSYSTEM": "1"}
-    before = subprocess.check_output(
-        ["git", "-C", d, "config", "--get-all", "remote.origin.url"],
-        env=env, timeout=60).decode().splitlines()
-    local_before = subprocess.check_output(
-        ["git", "-C", d, "config", "--local", "--get-all",
-         "remote.origin.url"], env=env, timeout=60).decode().splitlines()
+    urls = ("config", "--get-all", "remote.origin.url")
+    before = _out(d, *urls, env=env).splitlines()
+    local_before = _out(d, "config", "--local", *urls[1:], env=env).splitlines()
 
     _reauthor(d, "--reauthor", "Peter Z", "p@example.com",
               "Nitjsefnie", "z@example.com", env=env)
 
-    after = subprocess.check_output(
-        ["git", "-C", d, "config", "--get-all", "remote.origin.url"],
-        env=env, timeout=60).decode().splitlines()
-    local_after = subprocess.check_output(
-        ["git", "-C", d, "config", "--local", "--get-all",
-         "remote.origin.url"], env=env, timeout=60).decode().splitlines()
+    after = _out(d, *urls, env=env).splitlines()
+    local_after = _out(d, "config", "--local", *urls[1:], env=env).splitlines()
     assert after == before
     assert local_after == local_before == [local_url]
 
@@ -270,10 +241,8 @@ def test_failed_filter_repo_still_restores_remote_and_upstream(tmp):
               ("Human", "human@example.com"))
     remote = os.path.join(tmp, "remote.git")
     subprocess.run(["git", "init", "--bare", "-q", remote], check=True)
-    subprocess.run(["git", "-C", d, "remote", "add", "origin", remote],
-                   check=True)
-    subprocess.run(["git", "-C", d, "push", "-q", "-u", "origin", "main"],
-                   check=True)
+    _out(d, "remote", "add", "origin", remote)
+    _out(d, "push", "-q", "-u", "origin", "main")
     wrappers = os.path.join(tmp, "bin")
     os.makedirs(wrappers)
     fake = os.path.join(wrappers, "git-filter-repo")
@@ -295,12 +264,8 @@ def test_failed_filter_repo_still_restores_remote_and_upstream(tmp):
 
     assert result.returncode != 0
     assert "git-filter-repo failed" in result.stdout
-    assert subprocess.check_output(
-        ["git", "-C", d, "remote", "get-url", "origin"], timeout=60
-    ).decode().strip() == remote
-    assert subprocess.check_output(
-        ["git", "-C", d, "config", "--get", "branch.main.remote"],
-        timeout=60).decode().strip() == "origin"
+    assert _out(d, "remote", "get-url", "origin") == remote
+    assert _out(d, "config", "--get", "branch.main.remote") == "origin"
 
 
 def test_restore_configuration_failure_is_not_silenced(_tmp):
