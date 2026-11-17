@@ -35,6 +35,8 @@ updates:
     commit-message:
       prefix: ci
       include: scope
+    labels:
+      - dependencies
 
   # The workflows pin every action to a commit SHA with the version in a
   # trailing comment. A SHA pin does not move at all — which is the point,
@@ -52,12 +54,15 @@ updates:
     commit-message:
       prefix: ci
       include: scope
-    # One pull request for every action bump. github/codeql-action ships
-    # `init` and `analyze` as separate dependencies that must stay on one
-    # version: `analyze` fails when its version differs from `init`'s, so a
-    # pull request bumping either alone can never go green. A group covers
-    # version updates only unless it names `applies-to`, and security updates
-    # are enabled here, so they get a group of their own.
+    labels:
+      - dependencies
+    # One pull request per update kind for every action bump.
+    # github/codeql-action ships `init` and `analyze` as separate
+    # dependencies that must stay on one version: `analyze` fails when its
+    # version differs from `init`'s, so a pull request bumping either alone
+    # can never go green. A group covers version updates only unless it
+    # names `applies-to`, and security updates are enabled here, so they get
+    # a group of their own.
     groups:
       github-actions:
         patterns:
