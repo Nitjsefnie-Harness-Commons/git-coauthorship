@@ -62,6 +62,8 @@ def _invoke(args):
         sys.argv = ["author-stats", *args]
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             result = _AS.main()
+    except SystemExit as exc:
+        result = exc.code
     finally:
         sys.argv = old_argv
     return result, stdout.getvalue(), stderr.getvalue()
@@ -359,21 +361,9 @@ def test_a_bot_noreply_domain_near_miss_is_gated(tmp):
 
 def test_main_exits_two_for_an_invalid_revision_range(tmp):
     d, _hashes = _repo(tmp)
-    old_argv = sys.argv
-    stdout = io.StringIO()
-    stderr = io.StringIO()
-    try:
-        sys.argv = ["author-stats", "not-a-revision", "-C", d]
-        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            try:
-                _AS.main()
-            except SystemExit as exc:
-                assert exc.code == 2
-            else:
-                raise AssertionError("invalid revision did not exit 2")
-    finally:
-        sys.argv = old_argv
-    assert "git log failed" in stderr.getvalue()
+    result, _output, error = _invoke(["not-a-revision", "-C", d])
+    assert result == 2, result
+    assert "git log failed" in error
 
 
 def main():
