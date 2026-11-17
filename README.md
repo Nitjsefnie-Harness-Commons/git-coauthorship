@@ -7,12 +7,14 @@ history.
 
 Not on PyPI. Every release publishes the wheel with a `SHA256SUMS` file beside
 it, and checking against it is the point: fetching "the newest release" is
-otherwise a promise about a URL, not about the artifact CI built.
+otherwise a promise about a URL, not about the artifact CI built. Replace
+`<version>` with the version number of the release to install, without the
+leading `v`: `1.1.1` for the release tagged `v1.1.1` on the Releases page.
 
 ```sh
-gh release download v1.0.0 --repo Nitjsefnie-Harness-Commons/git-coauthorship
+gh release download v<version> --repo Nitjsefnie-Harness-Commons/git-coauthorship
 sha256sum -c SHA256SUMS
-pip install ./git_coauthorship-1.0.0-py3-none-any.whl
+pip install ./git_coauthorship-<version>-py3-none-any.whl
 ```
 
 | Tool | Purpose |
