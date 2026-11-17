@@ -29,9 +29,15 @@ GitHub-style `Co-authored-by:` counts as co-authored — unlike
 `reauthor.py`'s strict `Co-Authored-By:` check, whose job is
 "would --recent touch this", not "is this commit compliant".
 
-Exit status: 0 if every commit in range is co-authored, 1 if any are
-missing, 2 on error (no git, not a repo, bad range). The 0/1 split lets
-this gate a pre-push hook or CI step.
+A commit GitHub automation authored (github-actions[bot], dependabot[bot])
+is outside the co-author rule: its author name ends with `[bot]` and its
+email is GitHub's bot noreply address,
+`[<id>+]<name>[bot]@users.noreply.github.com`. It stays in every tally, and
+the summary and the `--missing` list mark it exempt.
+
+Exit status: 0 if every commit in range that is not bot-authored carries a
+trailer, 1 if any of those is missing one, 2 on error (no git, not a repo,
+bad range). The 0/1 split lets this gate a pre-push hook or CI step.
 
 Examples
 --------
@@ -44,6 +50,7 @@ python3 author_stats.py abc1234..HEAD      # only commits after abc1234
 """
 
 import argparse
+import re
 import subprocess
 import sys
 
@@ -60,6 +67,10 @@ _TRAILER_PREFIX = "co-authored-by:"
 # its body. `git log -z` puts a NUL between commits, %x00 puts NUL between
 # fields; one `split(b'\x00')` recovers every field cleanly.
 _SEP = b"\x00"
+
+# The name excludes `+`, so only a numeric `<id>+` may prefix it.
+_BOT_EMAIL = re.compile(
+    r"(?:\d+\+)?[^@+]+\[bot\]@(?i:users\.noreply\.github\.com)")
 
 
 def git_log_records(repo, revrange):
@@ -129,6 +140,14 @@ def tally_authors(records):
     return out
 
 
+def is_bot_author(name, email):
+    """True when both the name and the email are a GitHub bot's.
+
+    Either alone is not enough: anyone can name themselves `x[bot]`, and a
+    bot address under another name is not the automation committing."""
+    return name.endswith("[bot]") and _BOT_EMAIL.fullmatch(email) is not None
+
+
 def coauthor_trailers(body):
     """Return the list of Co-Authored-By trailer values in a commit body.
 
@@ -187,12 +206,13 @@ def main():
         print("No commits in range.")
         return 0
 
-    missing = []          # (hash, author, date, subject)
+    missing = []          # (hash, author, date, subject, is_bot)
     by_trailer = {}        # trailer value -> commit count ("(none)" for gaps)
-    for h, author, _email, date, subject, body in records:
+    for h, author, email, date, subject, body in records:
         trailers = coauthor_trailers(body)
         if not trailers:
-            missing.append((h, author, date, subject))
+            missing.append((h, author, date, subject,
+                            is_bot_author(author, email)))
             by_trailer["(none)"] = by_trailer.get("(none)", 0) + 1
         else:
             # A multi-trailer commit counts once per distinct trailer.
@@ -200,8 +220,11 @@ def main():
                 by_trailer[trailer] = by_trailer.get(trailer, 0) + 1
 
     coauthored = total - len(missing)
+    bots = sum(1 for gap in missing if gap[4])
     authors = tally_authors(records)
-    print(f"{total} commits, {coauthored} co-authored, {len(missing)} missing")
+    exempt = f" ({bots} bot-authored, exempt)" if bots else ""
+    print(f"{total} commits, {coauthored} co-authored, {len(missing)} missing"
+          f"{exempt}")
     print()
     print(f"By author ({len(authors)} distinct; the git author field):")
     for who, count in sorted(authors.items(), key=lambda kv: (-kv[1], kv[0])):
@@ -226,10 +249,11 @@ def main():
         print("MISSING TRAILER:")
         if not missing:
             print("  (none)")
-        for h, author, date, subject in missing:
-            print(f"  {h[:9]}  {date}  {author:<18.18}  {subject}")
+        for h, author, date, subject, is_bot in missing:
+            mark = "  (bot-authored, exempt)" if is_bot else ""
+            print(f"  {h[:9]}  {date}  {author:<18.18}  {subject}{mark}")
 
-    return 1 if missing else 0
+    return 1 if bots < len(missing) else 0
 
 
 if __name__ == "__main__":
