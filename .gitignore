@@ -46,6 +46,9 @@
 !/.github/comment-share.json
 !/.github/dependabot.yml
 !/.github/size-baseline.json
+!/.github/scripts/
+!/.github/scripts/publish_release.sh
+!/.github/scripts/test_publish_release.py
 !/.github/workflows/actionlint.yml
 !/.github/workflows/audit.yml
 !/.github/workflows/claim.yml
