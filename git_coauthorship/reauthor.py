@@ -850,15 +850,13 @@ def rewrite_identity(field, old_name, old_email, new_name, new_email,
                       "--commit-callback", callback])
 
 
-def reauthor(old_name, old_email, new_name, new_email, stop_full=None,
-             all_refs=False):
+def reauthor(old_name, old_email, new_name, new_email, stop_full=None, all_refs=False):
     """Rewrite the AUTHOR identity. See rewrite_identity()."""
     return rewrite_identity("author", old_name, old_email, new_name, new_email,
                             stop_full=stop_full, all_refs=all_refs)
 
 
-def recommitter(old_name, old_email, new_name, new_email, stop_full=None,
-                all_refs=False):
+def recommitter(old_name, old_email, new_name, new_email, stop_full=None, all_refs=False):
     """Rewrite the COMMITTER identity. See rewrite_identity()."""
     return rewrite_identity("committer", old_name, old_email, new_name,
                             new_email, stop_full=stop_full, all_refs=all_refs)
@@ -998,14 +996,12 @@ def main():
                 f"{args.older_inherit!r}"
             )
             announce_scope("older", args.all_refs, stop_full)
-            filter_repo_with_mapping(mapping, stop_full=stop_full,
-                                     all_refs=args.all_refs)
+            filter_repo_with_mapping(mapping, stop_full=stop_full, all_refs=args.all_refs)
 
         if args.all:
             print(f"[filter-repo] Tagging ALL commits with: {build_trailer(args.all[0], args.all[1])}")
             announce_scope("all", args.all_refs, stop_full)
-            filter_all(args.all[0], args.all[1], stop_full=stop_full,
-                       all_refs=args.all_refs)
+            filter_all(args.all[0], args.all[1], stop_full=stop_full, all_refs=args.all_refs)
 
         if args.rename:
             on, oe, nn, ne = args.rename
@@ -1024,8 +1020,7 @@ def main():
                 f"[filter-repo] Reauthoring: author {on} <{oe}>  ->  {nn} <{ne}>"
             )
             announce_scope("reauthor", args.all_refs, stop_full)
-            reauthor(on, oe, nn, ne, stop_full=stop_full,
-                     all_refs=args.all_refs)
+            reauthor(on, oe, nn, ne, stop_full=stop_full, all_refs=args.all_refs)
 
         if args.recommitter:
             on, oe, nn, ne = args.recommitter
@@ -1033,8 +1028,7 @@ def main():
                 f"[filter-repo] Recommitting: committer {on} <{oe}>  ->  {nn} <{ne}>"
             )
             announce_scope("recommitter", args.all_refs, stop_full)
-            recommitter(on, oe, nn, ne, stop_full=stop_full,
-                        all_refs=args.all_refs)
+            recommitter(on, oe, nn, ne, stop_full=stop_full, all_refs=args.all_refs)
 
         if args.push:
             # Plain --force, not --force-with-lease: a pass without --refs
