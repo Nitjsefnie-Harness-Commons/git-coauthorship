@@ -10,12 +10,12 @@ name: tag
 #
 # So this composes with it rather than replacing it: it reads the version on
 # every push to main that the gates run on, pushes the tag, and then STARTS
-# release.yml by hand. That last part is not belt-and-braces: a `v*` tag pushed with the
-# built-in GITHUB_TOKEN does not trigger release.yml at all. GitHub suppresses
-# workflow runs from token-authored events so a workflow cannot loop on its
-# own pushes, and `workflow_dispatch` is one of the two documented exceptions
-# to that rule -- which is why the last step below dispatches rather than
-# relying on the push.
+# release.yml by hand. That last part is not belt-and-braces: a `v*` tag
+# pushed with the built-in GITHUB_TOKEN does not trigger release.yml at
+# all. GitHub suppresses workflow runs from token-authored events so a
+# workflow cannot loop on its own pushes, and `workflow_dispatch` is one of
+# the two documented exceptions to that rule -- which is why the last step
+# below dispatches rather than relying on the push.
 #
 # Without it the failure is silent and total: the tag lands, the version looks
 # shipped, no release is ever cut, and nothing goes red.
@@ -34,9 +34,11 @@ name: tag
 # turns main green, and that commit usually touches other files. A push
 # that leaves an already-tagged version unchanged ends green at the
 # existing-tag step, before the wait, with nothing tagged or dispatched.
-# Neither re-running the bump commit's failed gates (no push, so no run) nor
-# an untagged bump's push whose run went red on checks a newer push
-# cancelled tags that commit: dispatch this workflow with its `sha` input.
+# Re-running a bump commit's failed gates creates no push, so no run. A
+# bump whose run went red on checks a newer push cancelled is tagged at the
+# newer tip by that push's run, once the tip's checks pass. To tag the bump
+# commit itself while its version is still untagged, re-run its failed or
+# cancelled gates until green, then dispatch this workflow with its `sha`.
 
 on:
   push:
