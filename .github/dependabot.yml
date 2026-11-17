@@ -25,10 +25,16 @@ updates:
       time: "04:30"
       timezone: Etc/UTC
     open-pull-requests-limit: 5
+    # Dependabot writes its own commit messages, so the Conventional Commits
+    # type only holds for them if it is configured here. `include: scope`
+    # appends the dependency's classification, which is not a constant: a
+    # requirements file whose name contains "dev" counts as development, so
+    # requirements-dev.txt bumps read `ci(deps-dev): ...` and
+    # requirements-test.txt bumps read `ci(deps): ...`. Without
+    # `prefix-development` the type stays `ci` for both.
     commit-message:
-      prefix: "deps"
-    labels:
-      - dependencies
+      prefix: ci
+      include: scope
 
   # The workflows pin every action to a commit SHA with the version in a
   # trailing comment. A SHA pin does not move at all — which is the point,
@@ -44,6 +50,19 @@ updates:
       timezone: Etc/UTC
     open-pull-requests-limit: 5
     commit-message:
-      prefix: "ci"
-    labels:
-      - dependencies
+      prefix: ci
+      include: scope
+    # One pull request for every action bump. github/codeql-action ships
+    # `init` and `analyze` as separate dependencies that must stay on one
+    # version: `analyze` fails when its version differs from `init`'s, so a
+    # pull request bumping either alone can never go green. A group covers
+    # version updates only unless it names `applies-to`, and security updates
+    # are enabled here, so they get a group of their own.
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+      github-actions-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
