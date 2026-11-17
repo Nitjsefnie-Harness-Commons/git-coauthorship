@@ -12,8 +12,8 @@
     3195
   ],
   ".github/workflows/codeql.yml": [
-    1619,
-    2413
+    1028,
+    1822
   ],
   ".github/workflows/lint.yml": [
     575,
@@ -32,8 +32,8 @@
     5711
   ],
   ".github/workflows/tests.yml": [
-    2415,
-    5281
+    2008,
+    4842
   ],
   ".github/workflows/types.yml": [
     642,
