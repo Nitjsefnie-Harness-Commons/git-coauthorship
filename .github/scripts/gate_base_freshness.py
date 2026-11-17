@@ -18,10 +18,12 @@ import sys
 from pathlib import Path
 
 # No ruleset exists yet, so these are the jobs every pull request runs: each
-# workflow below has an unfiltered `pull_request:` trigger. A name with no job
+# workflow below has an unfiltered `pull_request:` trigger. pr-gate and
+# pin-guard judge the base, claim runs on comments. A name with no job
 # behind it refuses rather than shrinking the set.
 REQUIRED_JOBS = ("actionlint", "suites", "wheel", "coverage", "pycodestyle",
-                 "pylint", "pyright", "pip-audit", "analyze")
+                 "pylint", "pyright", "pip-audit", "analyze", "comment-share",
+                 "size-baseline")
 
 BASE_BRANCH = "main"
 
