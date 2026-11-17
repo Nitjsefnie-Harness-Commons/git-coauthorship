@@ -182,6 +182,125 @@ def test_main_reports_empty_revision_range_as_success(tmp):
     assert output.strip() == "No commits in range."
 
 
+_ACTIONS = ("github-actions[bot] <41898282+github-actions[bot]"
+            "@users.noreply.github.com>")
+_DEPENDABOT = ("dependabot[bot] <49699333+dependabot[bot]"
+               "@users.noreply.github.com>")
+
+
+def _commit_as(d, author, message):
+    with open(os.path.join(d, "f.txt"), "a", encoding="utf-8") as fh:
+        fh.write(message)
+    _git(d, "add", "f.txt")
+    _git(d, "commit", "-q", f"--author={author}", "-m", message)
+    return _git(d, "rev-parse", "HEAD").stdout.strip()
+
+
+def _only_gap_by(tmp, author):
+    """Exit status and output for a range whose one gap is `author`'s."""
+    d, hashes = _repo(tmp)
+    _commit_as(d, author, "automated bump")
+    return _invoke([f"{hashes[0]}..HEAD", "-C", d])
+
+
+def test_bot_only_gaps_exit_zero_and_stay_in_every_tally(tmp):
+    d, hashes = _repo(tmp)
+    bot_hashes = [_commit_as(d, _ACTIONS, "actions bump"),
+                  _commit_as(d, _DEPENDABOT, "dependabot bump")]
+    result, output, error = _invoke(
+        [f"{hashes[0]}..HEAD", "--list", "--missing", "-C", d])
+    assert result == 0, output
+    assert not error
+    assert output.splitlines()[0] == (
+        "4 commits, 2 co-authored, 2 missing (2 bot-authored, exempt)"), output
+    assert f"      1  {_ACTIONS}" in output, output
+    assert f"      1  {_DEPENDABOT}" in output, output
+    assert "      2  (none)" in output, output
+    listed = output.split("ALL COMMITS:", 1)[1].split("MISSING TRAILER:")[0]
+    missing = output.split("MISSING TRAILER:", 1)[1]
+    for h in bot_hashes:
+        assert "MISSING" in next(line for line in listed.splitlines()
+                                 if h[:9] in line), listed
+        assert next(line for line in missing.splitlines()
+                    if h[:9] in line).endswith("(bot-authored, exempt)"), missing
+
+
+def test_a_human_gap_beside_bot_gaps_exits_one(tmp):
+    d, hashes = _repo(tmp)
+    _commit_as(d, _ACTIONS, "actions bump")
+    _commit_as(d, _DEPENDABOT, "dependabot bump")
+    result, output, _error = _invoke(["--missing", "-C", d])
+    assert result == 1, output
+    assert output.splitlines()[0] == (
+        "5 commits, 2 co-authored, 3 missing (2 bot-authored, exempt)"), output
+    human = next(line for line in output.split("MISSING TRAILER:", 1)[1]
+                 .splitlines() if hashes[0][:9] in line)
+    assert human.endswith("first missing"), human
+
+
+def test_a_history_without_bots_prints_no_exemption(tmp):
+    d, hashes = _repo(tmp)
+    result, output, _error = _invoke(["--missing", "-C", d])
+    assert result == 1
+    assert output.splitlines()[0] == "3 commits, 2 co-authored, 1 missing"
+    assert "bot-authored" not in output, output
+    assert next(line for line in output.splitlines()
+                if hashes[0][:9] in line).endswith("first missing"), output
+
+
+def test_the_id_prefixed_bot_noreply_form_is_exempt(tmp):
+    result, output, _error = _only_gap_by(tmp, _ACTIONS)
+    assert result == 0, output
+
+
+def test_the_bare_bot_noreply_form_is_exempt(tmp):
+    result, output, _error = _only_gap_by(
+        tmp, "dependabot[bot] <dependabot[bot]@users.noreply.github.com>")
+    assert result == 0, output
+
+
+def test_the_bot_noreply_domain_is_compared_case_blind(tmp):
+    result, output, _error = _only_gap_by(
+        tmp, "dependabot[bot] <49699333+dependabot[bot]"
+        "@Users.NoReply.GitHub.com>")
+    assert result == 0, output
+
+
+def test_a_bot_name_with_a_non_noreply_email_is_gated(tmp):
+    result, output, _error = _only_gap_by(
+        tmp, "github-actions[bot] <ci@example.com>")
+    assert result == 1, output
+
+
+def test_a_bot_noreply_email_under_a_name_lacking_bot_is_gated(tmp):
+    result, output, _error = _only_gap_by(
+        tmp, "github-actions <41898282+github-actions[bot]"
+        "@users.noreply.github.com>")
+    assert result == 1, output
+
+
+def test_a_person_noreply_email_under_a_bot_name_is_gated(tmp):
+    """A user's own noreply address has no `[bot]` in its local part."""
+    result, output, _error = _only_gap_by(
+        tmp, "github-actions[bot] <41898282+github-actions"
+        "@users.noreply.github.com>")
+    assert result == 1, output
+
+
+def test_a_non_numeric_noreply_prefix_is_gated(tmp):
+    result, output, _error = _only_gap_by(
+        tmp, "github-actions[bot] <ci+github-actions[bot]"
+        "@users.noreply.github.com>")
+    assert result == 1, output
+
+
+def test_a_bot_noreply_domain_near_miss_is_gated(tmp):
+    result, output, _error = _only_gap_by(
+        tmp, "github-actions[bot] <41898282+github-actions[bot]"
+        "@users.noreply.github.com.example>")
+    assert result == 1, output
+
+
 def test_main_exits_two_for_an_invalid_revision_range(tmp):
     d, _hashes = _repo(tmp)
     old_argv = sys.argv
