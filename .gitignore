@@ -10,19 +10,13 @@
 # Inverted, a file nobody named does not get committed, and this file describes
 # only what ships.
 #
-# The keep list names FILES, not extensions. A `!/shared/**/*.md` rule would be
-# shorter and would re-admit any note dropped where Markdown legitimately lives,
-# which is nearly every directory here.
+# The keep list names FILES, not extensions. A `!/**/*.md` rule would be
+# shorter and would re-admit any note dropped into a directory this file
+# re-opens, though Markdown legitimately lives only in the repository root and
+# `.github/`.
 #
 # Git will not look inside a directory it has ignored, so each directory below
 # is re-opened before its files are named back.
-#
-# Regenerate after adding files:
-#   python3 <this script's path> <repo>
-#
-# Forgetting to regenerate does not silently drop a file from the release:
-# install.py walks the payload on disk and refuses to install when it finds a
-# file `git ls-files` does not list.
 
 *
 
