@@ -66,7 +66,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The PR head: GitHub's test merge has main as a parent.
+          # A pull request's own head (GitHub's test merge has main as a
+          # parent); a push or dispatch checks out the event's commit.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           # Full history: the freshness and scope checks read main and the
           # pushed range, and a history read inherits the checkout's depth.
@@ -149,7 +150,8 @@ jobs:
 
       - name: Scan the history for secrets
         # This job runs on every pull request and push to main, so requiring
-        # its check gates merges. Bare: the exit status is the verdict.
+        # its check gates merges. Bare: a leak exits nonzero. A failed git
+        # walk is not a leak: gitleaks reports 0 commits and exits 0.
         # Bounded to HEAD: fetch-depth 0 fetched every branch, and another
         # branch's leak is not this head's; secrets.yml scans them daily.
         run: ./gitleaks detect --verbose --redact --log-opts='--full-history --diff-filter=tuxdb HEAD'

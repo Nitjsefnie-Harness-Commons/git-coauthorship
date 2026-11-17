@@ -1,6 +1,6 @@
 # Every dependency is pinned exactly, so a release never reds an unchanged
-# commit; Dependabot keeps the pins from going stale, which audit.yml can
-# only detect.
+# commit; Dependabot keeps the pins from going stale (a fixed CVE stays
+# exploitable), which audit.yml can only detect.
 
 version: 2
 updates:
@@ -13,7 +13,8 @@ updates:
       time: "04:30"
       timezone: Etc/UTC
     open-pull-requests-limit: 5
-    # `include: scope` adds the classification: requirements-dev.txt bumps
+    # `include: scope` adds the classification. A requirements file whose
+    # name contains "dev" counts as development: requirements-dev.txt bumps
     # read `ci(deps-dev): ...`, requirements-test.txt bumps `ci(deps): ...`.
     commit-message:
       prefix: ci
@@ -21,7 +22,8 @@ updates:
     labels:
       - dependencies
 
-  # Every action is pinned to a SHA, which only Dependabot moves.
+  # Actions are SHA-pinned (jobs hold a repository token); without
+  # Dependabot those pins never move.
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
