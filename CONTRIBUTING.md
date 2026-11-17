@@ -64,7 +64,7 @@ reliably reproducible, and say so in the Description instead.
 
 Claim an issue before you start by commenting `/claim` on an open, unassigned
 issue: the `claim` workflow assigns you. The number of issues one contributor
-can hold at once is limited.
+can hold at once is limited by repository role.
 
 ## Pull requests
 
