@@ -13,6 +13,7 @@ git-filter-repo is optional here: absent, the end-to-end tests return early
 as not-applicable rather than failing.
 """
 import contextlib
+import io
 import os
 import shutil
 import subprocess
@@ -637,6 +638,78 @@ def test_older_rewrites_only_the_current_branch(tmp):
 
 def test_all_rewrites_only_the_current_branch(tmp):
     _rewrites_only_the_current_branch(tmp, "--all")
+
+
+def _branches_left_behind(d):
+    """The other reported repro: `main` with two commits and `other` made
+    there, checked out nowhere, then `feature` checked out with a third. The
+    branches left behind point at an ancestor of the current branch, so the
+    pass rewrites their tip commit too. No commit carries a trailer."""
+    repo = _repo(d, OLD, OLD)
+    _commit(repo, OLD, OLD, "one")
+    assert _git(repo, "branch", "other").returncode == 0
+    assert _git(repo, "checkout", "-q", "-b", "feature").returncode == 0
+    _commit(repo, OLD, OLD, "feat")
+    return repo
+
+
+def _main_in(d, *args):
+    """Run reauthor's main() in `d` -> (its stdout, how much of it was
+    printed when the first filter-repo pass started, or -1 if none did)."""
+    stdout = io.StringIO()
+    started = []
+    real = _RA.__dict__["_run_filter_repo"]
+
+    def recording(command):
+        started.append(len(stdout.getvalue()))
+        return real(command)
+
+    old_argv = sys.argv
+    _RA.__dict__["_run_filter_repo"] = recording
+    try:
+        sys.argv = ["reauthor", *args]
+        with _in(d), contextlib.redirect_stdout(stdout):
+            _RA.main()
+    except SystemExit as exc:
+        raise AssertionError(
+            f"reauthor exited {exc.code}\n{stdout.getvalue()}") from exc
+    finally:
+        sys.argv = old_argv
+        _RA.__dict__["_run_filter_repo"] = real
+    return stdout.getvalue(), (started or [-1])[0]
+
+
+def _leaves_ancestor_branches_alone(tmp, mode):
+    _require_filter_repo()
+    d = _branches_left_behind(os.path.join(tmp, "r"))
+    before = {ref: _branch_tip(d, ref) for ref in ("main", "other", "feature")}
+    reflogs = {ref: _reflog(d, ref) for ref in ("main", "other")}
+    out, started = _main_in(d, *_MODES[mode])
+    problems = []
+    if _branch_tip(d, "feature") == before["feature"]:
+        problems.append("the current branch was not rewritten")
+    for ref in ("main", "other"):
+        if _branch_tip(d, ref) != before[ref]:
+            problems.append(f"{ref} moved")
+        if not reflogs[ref] or _reflog(d, ref) != reflogs[ref]:
+            problems.append(f"{ref}'s reflog changed")
+    for ref in ("other", "feature"):
+        if _git(d, "cat-file", "-e", before[ref]).returncode != 0:
+            problems.append(f"{ref}'s old tip was pruned")
+    scope = _scope_line(out, mode)
+    if scope != f"[{mode[2:]}] scope: the current branch — refs/heads/feature":
+        problems.append(f"scope line {scope!r}")
+    if not scope or not 0 <= out.find(scope) < started:
+        problems.append(f"scope at {out.find(scope)}, filter-repo at {started}")
+    assert not problems, f"{mode}: {problems}\n{out}"
+
+
+def test_older_leaves_ancestor_branches_alone(tmp):
+    _leaves_ancestor_branches_alone(tmp, "--older")
+
+
+def test_all_leaves_ancestor_branches_alone(tmp):
+    _leaves_ancestor_branches_alone(tmp, "--all")
 
 
 def _all_refs_rewrites_the_other_branch(tmp, mode):
