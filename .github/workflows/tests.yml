@@ -121,8 +121,8 @@ jobs:
         # Each suite in its OWN subprocess with --parallel-mode, then
         # combined, as run_tests.py runs them: another execution shape would
         # report coverage for a program nobody runs. A failing suite does not
-        # fail this job: tests.yml above owns that verdict, and the gate
-        # below is about how much code was reached.
+        # fail this job: the suites job above owns that verdict, and the
+        # gate below is about how much code was reached.
         run: |
           shopt -s nullglob
           suites=(tests/test_*.py)
@@ -140,11 +140,12 @@ jobs:
             echo "::endgroup::"
           done
 
-          # A FAILING suite is fine here — tests.yml above owns that verdict,
-          # and a test that fails still executed the lines it reached. Every
-          # suite failing is a different thing: it means nothing ran, and the
-          # number below would describe no program at all. That is not a low
-          # coverage result to gate on, it is a broken job.
+          # A FAILING suite is fine here — the suites job above owns that
+          # verdict, and a test that fails still executed the lines it
+          # reached. Every suite failing is a different thing: it means
+          # nothing ran, and the number below would describe no program at
+          # all. That is not a low coverage result to gate on, it is a broken
+          # job.
           if [ "$failed" -eq "${#suites[@]}" ]; then
             echo "every one of the ${#suites[@]} suites failed — refusing to" >&2
             echo "report a coverage number for a program that did not run." >&2
