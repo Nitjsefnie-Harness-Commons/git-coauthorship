@@ -2,49 +2,36 @@ name: tag
 
 # Creates the tag that release.yml consumes.
 #
-# release.yml already does the right thing once a `v*` tag exists: it runs
-# every suite, builds the wheel, and publishes SHA256SUMS beside it. What it
-# has no way to know is WHEN to fire — someone has to remember to push a tag
-# after bumping __version__, and a forgotten tag means a version bump that
-# never ships.
+# Once a `v*` tag exists, release.yml runs every suite, builds the wheel and
+# publishes SHA256SUMS beside it, but it cannot know WHEN: a tag forgotten
+# after a __version__ bump is a bump that never ships.
 #
-# So this composes with it rather than replacing it: it reads the version on
-# every push to main that the gates run on, pushes the tag, and then STARTS
-# release.yml by hand. That last part is not belt-and-braces: a `v*` tag
-# pushed with the built-in GITHUB_TOKEN does not trigger release.yml at
-# all. GitHub suppresses workflow runs from token-authored events so a
-# workflow cannot loop on its own pushes, and `workflow_dispatch` is one of
-# the two documented exceptions to that rule -- which is why the last step
-# below dispatches rather than relying on the push.
+# So this tags the version and then STARTS release.yml by hand: a tag pushed
+# with GITHUB_TOKEN triggers no workflow (GitHub suppresses runs from
+# token-authored events so a workflow cannot loop on its own pushes), and
+# `workflow_dispatch` is a documented exception. Without the dispatch the
+# tag lands, the version looks shipped, no release is cut, and nothing goes
+# red.
 #
-# Without it the failure is silent and total: the tag lands, the version looks
-# shipped, no release is ever cut, and nothing goes red.
+# It waits for the other gates first. A tag outlives a mistake: a branch
+# can be force-pushed, but a release someone has pulled cannot be
+# unpublished. release.yml re-runs the suites, but would not catch a lint or
+# type regression.
 #
-# release.yml re-runs the suites itself before publishing anything, so the
-# publish path keeps its own safety net regardless of what happened here.
-#
-# It still waits for the other gates first. A tag is the one artefact that
-# outlives a mistake — a branch can be force-pushed, but a release someone
-# has pulled cannot be unpublished — so tagging a red commit is worth
-# preventing even though release.yml would catch a failing suite later. It
-# would NOT catch a lint or type regression, which never reach that job.
-#
-# Every push the gates run on, not only one that edits __version__: a bump
-# whose own commit is red must still be tagged by whichever later commit
-# turns main green, and that commit usually touches other files. A push
-# that leaves an already-tagged version unchanged ends green at the
-# existing-tag step, before the wait, with nothing tagged or dispatched.
-# Re-running a bump commit's failed gates creates no push, so no run. A
-# bump whose run went red on checks a newer push cancelled is tagged at the
-# newer tip by that push's run, once the tip's checks pass. To tag the bump
-# commit itself while its version is still untagged, re-run its failed or
-# cancelled gates until green, then dispatch this workflow with its `sha`.
+# It runs on every push the gates run on, so a bump whose own commit is red
+# is tagged by whichever later commit (usually touching other files) turns
+# main green. A push leaving an already-tagged version unchanged ends green
+# before the wait. Re-running a bump commit's failed gates creates no push,
+# so no run. A bump whose run went red on checks a newer push cancelled is
+# tagged at the newer tip by that push's run, once its checks pass; to tag
+# the bump commit itself while untagged, re-run its gates green, then
+# dispatch with its `sha`.
 
 on:
   push:
     branches: [main]
-    # The gate workflows' own ignore list: on a push they skip, no check
-    # run exists for the commit, and the wait below would time out red.
+    # The gates' own ignore list: a push they skip has no check runs, and
+    # the wait would time out red.
     paths-ignore:
       - '**/*.md'
       - 'LICENSE'
@@ -60,11 +47,10 @@ permissions:
   contents: read
 
 concurrency:
-  # NOT cancel-in-progress: a superseded test run teaches you nothing and is
-  # worth cancelling; a superseded tag run may be midway through creating a
-  # tag. A PENDING run is another matter: under the default `queue: single`
-  # GitHub keeps one pending run per group, so a newer run cancels it (grey,
-  # not red), and the newer run judges the newer tip.
+  # NOT cancel-in-progress: unlike a test run, a superseded tag run may be
+  # midway through creating a tag. Under the default `queue: single` a
+  # newer run does cancel a PENDING one (grey, not red) and judges the newer
+  # tip itself.
   group: tag
   cancel-in-progress: false
 
@@ -74,13 +60,11 @@ jobs:
     timeout-minutes: 60
 
     permissions:
-      # Creating the tag. release.yml holds its own write permission for the
-      # release itself.
+      # Pushing the tag; release.yml holds its own for the release.
       contents: write
       # Reading the other workflows' results for this SHA.
       checks: read
-      # Dispatching release.yml. See the last step for why the tag push
-      # cannot do that on its own.
+      # Dispatching release.yml (the header says why).
       actions: write
 
     steps:
@@ -92,10 +76,8 @@ jobs:
 
       - name: Read and validate the version
         id: version
-        # Read from the installed attribute rather than grepped out of the
-        # file: pyproject.toml resolves the distribution version from this
-        # same attribute, so reading it the same way is the only way to be
-        # sure the tag and the wheel agree.
+        # Imported, not grepped: pyproject.toml resolves the wheel's version
+        # from this attribute, so the tag and the wheel agree.
         run: |
           version="$(python3 -c 'import git_coauthorship; print(git_coauthorship.__version__)')"
           if ! echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([._a-z0-9-]*)$'; then
@@ -113,23 +95,20 @@ jobs:
           REPO: ${{ github.repository }}
           # The branch tip before this push; empty on a dispatch.
           BEFORE: ${{ github.event.before }}
-        # On a push that left __version__ unchanged, an existing tag means
-        # that version already shipped: the job ends green here and every
-        # later step skips. Any other existing tag (a push that set an
-        # already-shipped version, a dispatch) is a mistaken edit or a rerun
-        # after a partial failure. Both want a human, and both are silent if
-        # this step is a no-op instead of an error. A before-push version
-        # that cannot be read ends red too, with its own message: the job
-        # cannot tell which of those cases it is in.
+        # An existing tag on a push that left __version__ unchanged means it
+        # shipped: green here, later steps skip. Any other existing tag (a
+        # push that set a shipped version, a dispatch) is a mistaken edit or
+        # a rerun after a partial failure: it ends red for a human, as a
+        # no-op here would be silent. An unreadable before-push version ends
+        # red with its own message, as the job cannot tell which case it is.
         #
-        # gh's exit status is the same for a 404 as for any other failure, so
-        # `--include` puts the HTTP status line first: only a 404 means the
-        # tag is free, and any other failed lookup ends red rather than
-        # guessing either way.
+        # gh exits alike on a 404 and any other failure, so `--include` puts
+        # the status line first: only a 404 means free; other failures end
+        # red.
         #
-        # The checkout is one commit deep, so the before-push commit is
-        # fetched by SHA, as actions/checkout fetched this one. No fetch depth
-        # could promise to reach it: one push can carry any number of commits.
+        # The checkout is one commit deep and a push can carry any number of
+        # commits, so the before-push commit is fetched by SHA, as
+        # actions/checkout fetched this one.
         run: |
           gh_status=0
           response="$(gh api --include -H "Cache-Control: no-cache" \
@@ -182,12 +161,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ inputs.sha || github.sha }}
           REPO: ${{ github.repository }}
-        # Three details that are each a way this can be wrong:
-        #   - it excludes ITSELF, or it would wait on a job waiting on it;
-        #   - it requires at least one other check to exist, so it cannot
-        #     race ahead and tag before CI has even been scheduled;
-        #   - `cancelled` counts as failure. A cancelled run means a newer
-        #     push superseded this SHA, which is not a commit to release.
+        # It excludes ITSELF (or it waits on itself); it needs at least one
+        # other check, so it cannot tag before CI is scheduled; `cancelled`
+        # counts as failure: a newer push superseded this SHA, which is not a
+        # commit to release.
         run: |
           deadline=$(( SECONDS + 45 * 60 ))
           while [ "$SECONDS" -lt "$deadline" ]; do
@@ -231,8 +208,7 @@ jobs:
         env:
           TAG: ${{ steps.version.outputs.tag }}
           SHA: ${{ inputs.sha || github.sha }}
-        # An annotated tag, not lightweight: it records who created it and
-        # when, which a lightweight tag does not.
+        # Annotated, not lightweight: it records who created it and when.
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -252,13 +228,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
           REPO: ${{ github.repository }}
-        # release.yml also triggers on `push: tags: v*`, and that trigger
-        # is what fires for a tag a HUMAN pushes. It does not fire for the
-        # tag the step above just pushed, because that push was
-        # authenticated with GITHUB_TOKEN. Dispatching is the documented
-        # way through, and it composes safely with the push trigger:
-        # release.yml replaces the assets on a release that already exists
-        # rather than failing, so firing twice is not a problem.
+        # release.yml's `push: tags: v*` fires for a tag a HUMAN pushes, not
+        # for this GITHUB_TOKEN push. Firing twice is harmless: release.yml
+        # replaces an existing release's assets rather than failing.
         run: |
           gh workflow run release.yml --repo "$REPO" --ref "$TAG"
           echo "Dispatched release.yml against $TAG."
