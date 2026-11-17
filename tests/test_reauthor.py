@@ -360,15 +360,15 @@ def test_parse_when_accepts_epoch_and_iso8601_forms(_tmp):
 
 TRAILER = "Co-Authored-By: Opus 5 <noreply@anthropic.com>"
 OLD, NEW = ("Peter Z", "p@example.com"), ("Nitjsefnie", "z@example.com")
-# mode -> (argv, text its rewrite leaves in `git log --format=_LOG`, its
-# preflight count line, that count when scoped, widened and --stop-at bound).
+# mode -> (argv, text its rewrite leaves in `git log --format=_LOG`, the
+# count line it prints, that count when scoped, widened and --stop-at bound).
 _LOG = "%B%an <%ae>|%cn <%ce>"
 _MODES = {
     "--reauthor": (["--reauthor", *OLD, *NEW], f"{NEW[0]} <{NEW[1]}>|{OLD[0]}",
                    "--reauthor: {} matching", (3, 5, 2)),
     "--recommitter": (["--recommitter", *OLD, *NEW], f"{OLD[1]}>|{NEW[0]}",
                       "--recommitter: {} matching", (3, 5, 2)),
-    "--older": (["--older", *NEW], f"By: {NEW[0]}", "", ()),
+    "--older": (["--older", *NEW], f"By: {NEW[0]}", "Filling {} commits", (2, 2, 1)),
     "--all": (["--all", *NEW], f"By: {NEW[0]}", "", ()),
     "--rename": (["--rename", "Opus 5", "noreply@anthropic.com", "Claude Opus 5",
                   "noreply@anthropic.com"], "By: Claude Opus 5",
@@ -456,7 +456,7 @@ def test_each_mode_rewrites_only_the_scope_it_prints(tmp):
     cases = [(mode, extra) for mode in _MODES for extra in
              ([], ["--all-refs"], ["--all-refs", "--stop-at", "main"])]
     problems = []
-    for i, (mode, extra) in enumerate(cases + [("--older", ["--all-refs", "--recent", "1", *NEW])]):
+    for i, (mode, extra) in enumerate(cases + [("--all", ["--all-refs", "--recent", "1", *NEW])]):
         d = _fixture(os.path.join(tmp, str(i)))
         before = {ref: _tip(d, ref) for ref in _REFS}
         reflogs = [_git(d, "reflog", "--format=%H", ref).stdout for ref in ("main", "other")]
