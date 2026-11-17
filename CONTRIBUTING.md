@@ -31,7 +31,8 @@ Only these scopes are used:
 | `author-stats` | `git_coauthorship/author_stats.py` and the `author-stats` command |
 | `harness` | the test machinery: `run_tests.py` and `tests/_util.py` |
 | `package` | `pyproject.toml`, the package's `__version__` and packaging |
-| `deps` | a pinned dependency or action version bump |
+| `deps` | a version bump of any other pinned dependency or action |
+| `deps-dev` | a version bump in `requirements-dev.txt`, the lint and type toolchain |
 | `readme` | `README.md` |
 | `contributing` | `CONTRIBUTING.md` |
 | `templates` | the issue and pull-request forms |
@@ -61,8 +62,9 @@ marked unverified.
 Drop the Reproduction Steps section, header included, when the problem is not
 reliably reproducible, and say so in the Description instead.
 
-Claim an issue before you start by commenting `/claim` on it: the `claim`
-workflow assigns you.
+Claim an issue before you start by commenting `/claim` on an open, unassigned
+issue: the `claim` workflow assigns you. The number of issues one contributor
+can hold at once is limited.
 
 ## Pull requests
 
