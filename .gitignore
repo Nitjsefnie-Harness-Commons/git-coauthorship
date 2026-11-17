@@ -47,7 +47,9 @@
 !/.github/dependabot.yml
 !/.github/size-baseline.json
 !/.github/scripts/
+!/.github/scripts/gate_base_freshness.py
 !/.github/scripts/publish_release.sh
+!/.github/scripts/test_gate_base_freshness.py
 !/.github/scripts/test_publish_release.py
 !/.github/workflows/actionlint.yml
 !/.github/workflows/audit.yml
