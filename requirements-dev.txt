@@ -5,8 +5,9 @@
 # is never installed by the wheel.
 #
 # CI installs with --require-hashes. Dependabot bumps the versions and
-# hashes in one grouped pull request, checking each only against the Python
-# version; when the newest versions do not fit each other's bounds, or one
+# hashes in grouped pull requests, one for version updates and one for
+# security updates, checking each bump only against the Python version;
+# when the newest versions do not fit each other's bounds, or one
 # needs a dependency this file lacks, that install fails until the pins are
 # regenerated. Resolved for every platform on Python 3.13; regenerate with:
 #   grep -oE '^(pycodestyle|pylint|pyright)==[^ ]+' requirements-dev.txt | uv pip compile - --universal --generate-hashes --no-annotate --no-header --no-emit-package pip --python-version 3.13
