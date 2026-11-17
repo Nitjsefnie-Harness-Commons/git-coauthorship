@@ -7,25 +7,18 @@ keeps the original rewrite behavior intact.
 
 --recent   Rebase last N commits; add trailer if missing.
 --older    Fill ALL gaps in the current branch's history. Each gap looks
-           backward to the nearest
-           coauthored commit for its author:
+           backward to the nearest coauthored commit for its author:
              - If that trailer matches --older-inherit REGEX → inherit it
              - Otherwise → use the default --older value
            The default regex is ``Opus`` solely for compatibility with this
            historical Claude workflow; it is not a generic git rule.
-           Existing coauthored commits are never touched. Gaps are found
-           and filled on the current branch's history only, and only the
-           current branch is rewritten. With --all-refs every ref is
-           rewritten too, but nothing is filled off the current branch:
-           a commit only on another ref keeps its message, and gets a
-           new SHA only when it descends from a filled commit.
+           Existing coauthored commits are never touched.
 --older-inherit
            Regex selecting which existing boundary trailer --older inherits.
            Default: ``Opus`` (legacy behavior). Use a provider/model regex for
            another history, ``.`` to inherit any non-empty trailer, or ``(?!)``
            to disable inheritance and always use the --older default.
---all      Overwrite every commit on the current branch with a single
-           trailer; with --all-refs, every commit in the repository.
+--all      Overwrite every commit in scope with a single trailer.
 --rename   Rewrite one co-author identity across history. Every
            `Co-Authored-By: <OLD_NAME> <<OLD_EMAIL>>` trailer becomes
            `Co-Authored-By: <NEW_NAME> <<NEW_EMAIL>>`. Case-insensitive
@@ -36,17 +29,16 @@ keeps the original rewrite behavior intact.
            prints the refs and the match count before touching anything,
            and --dry-run stops after printing.
 --all-refs Modifier for --older, --all, --rename, --reauthor and
-           --recommitter: rewrite every ref in the repository, not only the
-           current branch (--older still fills gaps on the current
-           branch's history only). Without it each of those modes rewrites the
-           current branch alone and prints that scope before acting; given
-           with none of them (--recent only ever rebases the current
-           branch) it is refused. Reflogs are expired and pre-rewrite
-           objects pruned, so a branch nobody named comes back with a new
-           SHA and no local way to recover the old one — in a checkout
-           shared through `git worktree` that moves every other session's
-           HEAD. --stop-at overrides it: the rewrite stays bounded to
-           <stop>..HEAD on the current branch.
+           --recommitter, which otherwise rewrite only the current branch
+           and print that scope first: rewrite every ref in the repository
+           (--older still fills only the current branch's gaps, so a commit
+           only on another ref keeps its message). Refused without one of
+           them; --recent rebases only the current branch. Reflogs are
+           expired and pre-rewrite objects pruned, so a branch nobody named
+           comes back with a new SHA and no local way to recover the old
+           one — in a checkout shared through `git worktree` that moves
+           every other session's HEAD. --stop-at overrides it, bounding the
+           pass to <stop>..HEAD.
 --dry-run  Modifier for --rename: print the scope preflight and exit
            without rewriting anything.
 --reauthor Overwrite the git AUTHOR of every commit whose author matches
@@ -55,19 +47,16 @@ keeps the original rewrite behavior intact.
            For cleaning up commits where an agent was recorded as the
            author instead of a co-author. It does NOT add a co-author
            trailer; pair it with --older or a manual pass if the agent
-           also needs to appear as Co-Authored-By. Scoped to the current
-           branch unless --all-refs is given.
+           also needs to appear as Co-Authored-By.
 --recommitter
            Same as --reauthor but for the COMMITTER field. Matches on the
            committer identity, not the author's — a web-merged PR is
            authored by a person and committed by `GitHub
            <noreply@github.com>`, so the two fields need separate passes.
-           Author field and co-author trailers are untouched. Scoped to
-           the current branch unless --all-refs is given.
-           Both identity modes preflight exact matches in that scope. Zero
-           matches skip git-filter-repo entirely; a nonzero pass prints its
-           match count and warns that filter-repo strips GPG signatures
-           before rewriting.
+           Author field and co-author trailers are untouched.
+           Both identity modes preflight exact matches. Zero matches skip
+           git-filter-repo entirely; a nonzero pass prints its match count and
+           warns that filter-repo strips GPG signatures before rewriting.
 --between  Modifier for --older: fill only INTERIOR gaps — runs of
            un-trailered commits bracketed by a co-authored commit on
            BOTH sides. The oldest pre-AI run (nothing co-authored older
@@ -760,12 +749,9 @@ def rename_trailer(old_name, old_email, new_name, new_email, stop_full=None,
 
 def matching_identity_commits(field, old_name, old_email, stop_full=None,
                               all_refs=False):
-    """Commit hashes whose selected identity exactly matches the old value.
-
-    Walks what the identity pass rewrites: the current branch, or every ref
-    when `all_refs` is set. A stop boundary keeps only commits in
-    <stop>..HEAD, the range the callback is bounded to.
-    """
+    """Commit hashes whose selected identity exactly matches the old value,
+    in the scope the pass rewrites: HEAD, every ref with `all_refs`, and
+    only <stop>..HEAD under a stop boundary."""
     if field not in ("author", "committer"):
         raise ValueError(f"field must be 'author' or 'committer', got {field!r}")
     name_field, email_field = (
@@ -806,10 +792,7 @@ def rewrite_identity(field, old_name, old_email, new_name, new_email,
     matching on the author identity would never see it.
 
     Values are passed to the git-filter-repo callback via a JSON sidecar
-    so identities containing quotes can't break the generated code.
-
-    The pass rewrites the current branch only, or every ref when `all_refs`
-    is set; the preflight count walks the same scope."""
+    so identities containing quotes can't break the generated code."""
     if field not in ("author", "committer"):
         raise ValueError(f"field must be 'author' or 'committer', got {field!r}")
     flag = "--reauthor" if field == "author" else "--recommitter"
@@ -1055,10 +1038,9 @@ def main():
 
         if args.push:
             # Plain --force, not --force-with-lease: a pass without --refs
-            # (--all-refs, no --stop-at) strips remote-tracking refs, so
-            # --force-with-lease bails with "stale info" there. Scoped passes
-            # keep them, but this one push serves every scope, and history
-            # was just rewritten on purpose: plain --force is intended.
+            # (--all-refs, no --stop-at) strips remote-tracking refs, so a
+            # lease bails with "stale info" there, and history was just
+            # rewritten on purpose; this one push serves every scope.
             git("push", "origin", "HEAD", "--force")
             print("[push] Force-pushed.")
 
