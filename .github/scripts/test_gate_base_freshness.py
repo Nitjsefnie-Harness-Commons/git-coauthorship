@@ -131,7 +131,8 @@ class ThisRepository(Fixture):
     def test_required_jobs_are_the_jobs_every_pull_request_runs(self) -> None:
         self.assertEqual(gate.REQUIRED_JOBS, ("actionlint", "suites", "wheel", "coverage",
                                               "pycodestyle", "pylint", "pyright",
-                                              "pip-audit", "analyze"))
+                                              "pip-audit", "analyze", "comment-share",
+                                              "size-baseline"))
         files = gate.tracked_files(ROOT)
         for job in gate.REQUIRED_JOBS:
             defining = [name for name in gate.workflow_names(files)
@@ -148,18 +149,22 @@ class ThisRepository(Fixture):
         done = self.run_gate("--print-paths", cwd=ROOT)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout.splitlines(), [
-            ".github/scripts/commit_scopes.py", ".github/scripts/gate_base_freshness.py",
-            ".github/scripts/publish_release.sh", ".github/scripts/test_commit_scopes.py",
+            ".github/comment-share.json", ".github/scripts/commit_scopes.py",
+            ".github/scripts/gate_base_freshness.py", ".github/scripts/publish_release.sh",
+            ".github/scripts/test_commit_scopes.py",
             ".github/scripts/test_gate_base_freshness.py",
-            ".github/scripts/test_publish_release.py", ".github/workflows/actionlint.yml", ".github/workflows/audit.yml",
-            ".github/workflows/codeql.yml", ".github/workflows/lint.yml",
-            ".github/workflows/release.yml", ".github/workflows/tag.yml",
-            ".github/workflows/tests.yml", ".github/workflows/types.yml",
-            ".pylintrc", "git_coauthorship/__init__.py",
+            ".github/scripts/test_publish_release.py", ".github/size-baseline.json",
+            ".github/workflows/actionlint.yml", ".github/workflows/audit.yml",
+            ".github/workflows/claim.yml", ".github/workflows/codeql.yml",
+            ".github/workflows/comment-share.yml", ".github/workflows/lint.yml",
+            ".github/workflows/pin-guard.yml", ".github/workflows/pr-gate.yml",
+            ".github/workflows/release.yml", ".github/workflows/size-baseline.yml",
+            ".github/workflows/tag.yml", ".github/workflows/tests.yml",
+            ".github/workflows/types.yml", ".pylintrc", "git_coauthorship/__init__.py",
             "git_coauthorship/author_stats.py", "git_coauthorship/reauthor.py",
-            "requirements-dev.txt", "requirements-test.txt", "run_tests.py",
-            "tests/_util.py", "tests/test_author_stats.py",
-            "tests/test_package_contract.py", "tests/test_reauthor.py"])
+            "requirements-dev.txt", "requirements-test.txt", "run_tests.py", "tests/_util.py",
+            "tests/test_author_stats.py", "tests/test_package_contract.py",
+            "tests/test_reauthor.py"])
 
     def test_every_tracked_workflow_parses(self) -> None:
         for name in gate.workflow_names(gate.tracked_files(ROOT)):
