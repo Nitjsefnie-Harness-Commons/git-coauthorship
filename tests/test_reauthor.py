@@ -296,28 +296,6 @@ def test_restore_configuration_failure_is_not_silenced(_tmp):
         _RA.__dict__["_BRANCH_TRACKING"] = old_tracking
 
 
-def test_recommitter_rewrites_committer_and_leaves_author(tmp):
-    _require_filter_repo()
-    d = _repo(os.path.join(tmp, "r"), ("Peter Z", "p@example.com"),
-              ("GitHub", "noreply@github.com"))
-    _reauthor(d, "--recommitter", "GitHub", "noreply@github.com",
-              "Nitjsefnie", "z@example.com")
-    an, ae, cn, ce = _idents(d)
-    assert (cn, ce) == ("Nitjsefnie", "z@example.com"), (cn, ce)
-    assert (an, ae) == ("Peter Z", "p@example.com"), (an, ae)
-
-
-def test_reauthor_rewrites_author_and_leaves_committer(tmp):
-    _require_filter_repo()
-    d = _repo(os.path.join(tmp, "r"), ("Peter Z", "p@example.com"),
-              ("GitHub", "noreply@github.com"))
-    _reauthor(d, "--reauthor", "Peter Z", "p@example.com",
-              "Nitjsefnie", "z@example.com")
-    an, ae, cn, ce = _idents(d)
-    assert (an, ae) == ("Nitjsefnie", "z@example.com"), (an, ae)
-    assert (cn, ce) == ("GitHub", "noreply@github.com"), (cn, ce)
-
-
 def test_recommitter_matches_on_committer_not_author(tmp):
     """A committer identity that is NOT the author's must still be found —
     the case an author-keyed modifier would have missed entirely."""
@@ -381,83 +359,31 @@ def test_parse_when_accepts_epoch_and_iso8601_forms(_tmp):
 
 
 TRAILER = "Co-Authored-By: Opus 5 <noreply@anthropic.com>"
+OLD, NEW = ("Peter Z", "p@example.com"), ("Nitjsefnie", "z@example.com")
+# mode -> (argv, text its rewrite leaves in `git log --format=_LOG`, its
+# preflight count line, that count when scoped, widened and --stop-at bound).
+_LOG = "%B%an <%ae>|%cn <%ce>"
+_MODES = {
+    "--reauthor": (["--reauthor", *OLD, *NEW], f"{NEW[0]} <{NEW[1]}>|{OLD[0]}",
+                   "--reauthor: {} matching", (3, 5, 2)),
+    "--recommitter": (["--recommitter", *OLD, *NEW], f"{OLD[1]}>|{NEW[0]}",
+                      "--recommitter: {} matching", (3, 5, 2)),
+    "--older": (["--older", *NEW], f"By: {NEW[0]}", "", ()),
+    "--all": (["--all", *NEW], f"By: {NEW[0]}", "", ()),
+    "--rename": (["--rename", "Opus 5", "noreply@anthropic.com", "Claude Opus 5",
+                  "noreply@anthropic.com"], "By: Claude Opus 5",
+                 "[rename] {} commit(s) carry", (1, 2, 1)),
+}
+_REFS = ("feature", "main", "other", "refs/remotes/origin/main")
 
 
-def _branch_tip(d, ref):
-    return subprocess.check_output(
-        ["git", "-C", d, "rev-parse", ref], timeout=60).decode().strip()
+def _git(d, *args):
+    return subprocess.run(["git", "-C", d, *args], capture_output=True,
+                          text=True, check=False, timeout=60)
 
 
-def _rename_fixture(d):
-    """A repo with `main` checked out and `other`, which is not its ancestor.
-
-    Both branches carry a commit with the old trailer, so a rename has work to
-    do on each and the difference between the two scopes is visible.
-    """
-    ident = ("Dev", "dev@example.com")
-    _repo(d, ident, ident)
-    subprocess.run(["git", "-C", d, "checkout", "-q", "-b", "other"],
-                   check=True, timeout=60)
-    _commit(d, ident, ident, f"other work\n\n{TRAILER}")
-    subprocess.run(["git", "-C", d, "checkout", "-q", "main"],
-                   check=True, timeout=60)
-    _commit(d, ident, ident, f"main work\n\n{TRAILER}")
-    return d
-
-
-def test_rename_leaves_branches_it_was_not_pointed_at_alone(tmp):
-    """The reported defect: `--rename` rewrote every ref in the repository.
-
-    A branch that is not an ancestor of HEAD and was never named came back
-    with a new SHA and no reflog, which in a checkout shared through
-    `git worktree` moves every other session's HEAD out from under it.
-    """
-    _require_filter_repo()
-    d = _rename_fixture(os.path.join(tmp, "scoped"))
-    before_other = _branch_tip(d, "other")
-    before_main = _branch_tip(d, "main")
-    _reauthor(d, "--rename", "Opus 5", "noreply@anthropic.com",
-              "Claude Opus 5", "noreply@anthropic.com")
-    assert _branch_tip(d, "main") != before_main, "the current branch was not rewritten"
-    assert _branch_tip(d, "other") == before_other, "an unnamed branch was rewritten"
-    body = subprocess.check_output(
-        ["git", "-C", d, "log", "-1", "--format=%B"], timeout=60).decode()
-    assert "Claude Opus 5" in body, body
-
-
-def test_rename_all_refs_is_available_explicitly(tmp):
-    """The old behaviour stays reachable, by asking for it."""
-    _require_filter_repo()
-    d = _rename_fixture(os.path.join(tmp, "allrefs"))
-    before_other = _branch_tip(d, "other")
-    _reauthor(d, "--all-refs", "--rename", "Opus 5", "noreply@anthropic.com",
-              "Claude Opus 5", "noreply@anthropic.com")
-    assert _branch_tip(d, "other") != before_other, "--all-refs left a ref alone"
-
-
-def test_rename_states_its_scope_and_dry_run_changes_nothing(tmp):
-    """No commit count, no ref list and no dry run was the other half of it."""
-    _require_filter_repo()
-    d = _rename_fixture(os.path.join(tmp, "dry"))
-    before = _branch_tip(d, "main")
-    out = _reauthor(d, "--dry-run", "--rename", "Opus 5",
-                    "noreply@anthropic.com", "Claude Opus 5",
-                    "noreply@anthropic.com").stdout
-    assert "refs/heads/main" in out, out
-    assert "1 commit(s) carry the old trailer" in out, out
-    assert "--all-refs" in out, out
-    assert _branch_tip(d, "main") == before, "--dry-run rewrote history"
-
-
-def test_rename_with_no_matches_does_not_rewrite(tmp):
-    """A rename that matches nothing still renamed every SHA under it."""
-    _require_filter_repo()
-    d = _rename_fixture(os.path.join(tmp, "nomatch"))
-    before = _branch_tip(d, "main")
-    out = _reauthor(d, "--rename", "Nobody", "nobody@example.com",
-                    "Somebody", "somebody@example.com").stdout
-    assert "Nothing to rename" in out, out
-    assert _branch_tip(d, "main") == before, "a no-op rename rewrote history"
+def _tip(d, ref):
+    return _git(d, "rev-parse", "-q", "--verify", ref).stdout.strip()
 
 
 @contextlib.contextmanager
@@ -471,461 +397,122 @@ def _in(directory):
         os.chdir(previous)
 
 
-def test_rename_scope_counts_and_names_only_the_current_branch(tmp):
-    _require_git()
-    d = _rename_fixture(os.path.join(tmp, "scope"))
-    with _in(d):
-        matches, refs = _RA.rename_scope("Opus 5", "noreply@anthropic.com", False)
-    assert matches == 1, matches
-    assert refs == ["refs/heads/main"], refs
-
-
-def test_rename_scope_over_all_refs_sees_every_branch(tmp):
-    _require_git()
-    d = _rename_fixture(os.path.join(tmp, "scopeall"))
-    with _in(d):
-        matches, refs = _RA.rename_scope("Opus 5", "noreply@anthropic.com", True)
-    assert matches == 2, matches
-    assert sorted(refs) == ["refs/heads/main", "refs/heads/other"], refs
-
-
-def test_rename_scope_honours_an_explicit_commit_set(tmp):
-    """--stop-at and the date window both arrive as a commit-hash scope."""
-    _require_git()
-    d = _rename_fixture(os.path.join(tmp, "scopeset"))
-    with _in(d):
-        assert _RA.rename_scope(
-            "Opus 5", "noreply@anthropic.com", False, scope=set())[0] == 0
-        head = _head(d)
-        assert _RA.rename_scope(
-            "Opus 5", "noreply@anthropic.com", False, scope={head})[0] == 1
-
-
-def test_rename_scope_outside_a_repository_reports_nothing(tmp):
-    plain = os.path.join(tmp, "plain")
-    os.makedirs(plain, exist_ok=True)
-    with _in(plain):
-        assert _RA.rename_scope("A", "a@x", False) == (None, [])
-
-
-OLD = ("Peter Z", "p@example.com")
-NEW = ("Nitjsefnie", "z@example.com")
-_MODES = {
-    "--reauthor": ["--reauthor", *OLD, *NEW],
-    "--recommitter": ["--recommitter", *OLD, *NEW],
-    "--older": ["--older", *NEW],
-    "--all": ["--all", *NEW],
-    "--rename": ["--rename", "Opus 5", "noreply@anthropic.com",
-                 "Claude Opus 5", "noreply@anthropic.com"],
-}
-
-
-def _git(d, *args):
-    return subprocess.run(["git", "-C", d, *args], capture_output=True,
-                          text=True, check=False, timeout=60)
-
-
-def _shared_checkout(d):
-    """The reported repro: `main` checked out, `other` sharing its first
-    commit and checked out in a second `git worktree`, and an `origin/main`
-    remote-tracking ref. Every commit is OLD's as author and committer.
-    The shared base and `other`'s own commit carry no trailer and `main`'s
-    own commit carries TRAILER, so every mode has work on `main` and the
-    identity modes have work on `other` too.
-    """
-    repo = _repo(os.path.join(d, "repo"), OLD, OLD)
-    base = _head(repo)
-    assert _git(repo, "branch", "other").returncode == 0
-    worktree = os.path.join(d, "wt")
-    assert _git(repo, "worktree", "add", "-q", worktree,
-                "other").returncode == 0
-    _commit(worktree, OLD, OLD, "other work")
-    _commit(repo, OLD, OLD, f"main work\n\n{TRAILER}")
-    assert _git(repo, "update-ref", "refs/remotes/origin/main",
-                base).returncode == 0
-    return repo
-
-
-def _reflog(d, ref):
-    return _git(d, "reflog", "show", "--format=%H", ref).stdout.split()
-
-
-def _scope_line(out, mode):
-    """The `[<mode>] scope: ...` line, or '' when none was printed."""
-    tag = f"[{mode[2:]}] scope: "
-    return next((line for line in out.splitlines()
-                 if line.startswith(tag)), "")
-
-
-def _rewrites_only_the_current_branch(tmp, mode):
-    _require_filter_repo()
-    d = _shared_checkout(tmp)
-    before = {ref: _branch_tip(d, ref)
-              for ref in ("main", "other", "refs/remotes/origin/main")}
-    reflog = _reflog(d, "other")
-    out = _reauthor(d, *_MODES[mode]).stdout
-    # Collected, not asserted one by one: a reverted --refs breaks every
-    # limb at once, and the report should show each of them.
-    problems = []
-    if _branch_tip(d, "main") == before["main"]:
-        problems.append("the current branch was not rewritten")
-    if _branch_tip(d, "other") != before["other"]:
-        problems.append("the other worktree's branch moved")
-    origin = _git(d, "rev-parse", "--verify", "-q",
-                  "refs/remotes/origin/main").stdout.strip()
-    if origin != before["refs/remotes/origin/main"]:
-        problems.append(f"origin/main resolves to {origin!r}")
-    if _git(d, "cat-file", "-e", before["main"]).returncode != 0:
-        problems.append("the current branch's old tip was pruned")
-    if not reflog or _reflog(d, "other") != reflog:
-        problems.append("the other branch's reflog changed")
-    scope = _scope_line(out, mode)
-    if "the current branch" not in scope or \
-            not scope.endswith("refs/heads/main"):
-        problems.append(f"scope line {scope!r}")
-    if f"[{mode[2:]}] Other refs are untouched. Pass --all-refs to " \
-            "rewrite the whole repository." not in out.splitlines():
-        problems.append("no note that other refs are untouched")
-    assert not problems, f"{mode}: {problems}\n{out}"
-
-
-def test_reauthor_rewrites_only_the_current_branch(tmp):
-    _rewrites_only_the_current_branch(tmp, "--reauthor")
-
-
-def test_recommitter_rewrites_only_the_current_branch(tmp):
-    _rewrites_only_the_current_branch(tmp, "--recommitter")
-
-
-def test_older_rewrites_only_the_current_branch(tmp):
-    _rewrites_only_the_current_branch(tmp, "--older")
-
-
-def test_all_rewrites_only_the_current_branch(tmp):
-    _rewrites_only_the_current_branch(tmp, "--all")
-
-
-def _branches_left_behind(d):
-    """The other reported repro: `main` with two commits and `other` made
-    there, checked out nowhere, then `feature` checked out with a third. The
-    branches left behind point at an ancestor of the current branch, so the
-    pass rewrites their tip commit too. No commit carries a trailer."""
-    repo = _repo(d, OLD, OLD)
-    _commit(repo, OLD, OLD, "one")
-    assert _git(repo, "branch", "other").returncode == 0
-    assert _git(repo, "checkout", "-q", "-b", "feature").returncode == 0
-    _commit(repo, OLD, OLD, "feat")
+def _fixture(d):
+    """The reported shape: `feature` checked out, `main` and `origin/main`
+    left behind at the base commit, which every mode but --rename rewrites,
+    and `other` checked out in a second worktree. `feature` and `other` each
+    add a TRAILER commit and then a gap, so every mode has work on both;
+    every commit is OLD's as author and committer."""
+    repo, worktree = _repo(os.path.join(d, "repo"), OLD, OLD), os.path.join(d, "wt")
+    for args in (["worktree", "add", "-q", "-b", "other", worktree],
+                 ["checkout", "-q", "-b", "feature"],
+                 ["update-ref", "refs/remotes/origin/main", "main"]):
+        assert _git(repo, *args).returncode == 0, args
+    for where, branch in ((repo, "feature"), (worktree, "other")):
+        _commit(where, OLD, OLD, f"{branch} work\n\n{TRAILER}")
+        _commit(where, OLD, OLD, f"{branch} gap")
     return repo
 
 
 def _main_in(d, *args):
-    """Run reauthor's main() in `d` -> (its stdout, how much of it was
-    printed when the first filter-repo pass started, or -1 if none did)."""
-    stdout = io.StringIO()
-    started = []
-    real = _RA.__dict__["_run_filter_repo"]
+    """Run reauthor's main() in `d` -> (exit status, stdout, [(how much
+    stdout was printed when it started, argv)] per filter-repo pass). With
+    no git-filter-repo a stub answers its --help probe and passes are only
+    recorded."""
+    found, stub = shutil.which("git-filter-repo"), os.path.join(d, os.pardir, "bin")
+    if not found:
+        if os.name == "nt":
+            _util.skip("the git-filter-repo stub is a POSIX shell script")
+        os.makedirs(stub, exist_ok=True)
+        with open(os.path.join(stub, "git-filter-repo"), "w", encoding="utf-8") as f:
+            f.write("#!/bin/sh\nexit 0\n")
+        os.chmod(f.name, 0o700)
+    stdout, runs, code = io.StringIO(), [], 0
+    real, saved = _RA.__dict__["_run_filter_repo"], (sys.argv, os.environ["PATH"])
 
     def recording(command):
-        started.append(len(stdout.getvalue()))
-        return real(command)
+        runs.append((len(stdout.getvalue()), command))
+        return real(command) if found else None
 
-    old_argv = sys.argv
     _RA.__dict__["_run_filter_repo"] = recording
+    sys.argv, os.environ["PATH"] = ["reauthor", *args], stub + os.pathsep + saved[1]
     try:
-        sys.argv = ["reauthor", *args]
         with _in(d), contextlib.redirect_stdout(stdout):
             _RA.main()
     except SystemExit as exc:
-        raise AssertionError(
-            f"reauthor exited {exc.code}\n{stdout.getvalue()}") from exc
+        code = exc.code
     finally:
-        sys.argv = old_argv
+        sys.argv, os.environ["PATH"] = saved
         _RA.__dict__["_run_filter_repo"] = real
-    return stdout.getvalue(), (started or [-1])[0]
+    return code, stdout.getvalue(), runs
 
 
-def _leaves_ancestor_branches_alone(tmp, mode):
-    _require_filter_repo()
-    d = _branches_left_behind(os.path.join(tmp, "r"))
-    before = {ref: _branch_tip(d, ref) for ref in ("main", "other", "feature")}
-    reflogs = {ref: _reflog(d, ref) for ref in ("main", "other")}
-    out, started = _main_in(d, *_MODES[mode])
+def test_each_mode_rewrites_only_the_scope_it_prints(tmp):
+    """Each mode alone, with --all-refs, and with --stop-at beside --all-refs
+    (the bound wins), plus --all-refs beside --recent, the near miss of its
+    refusal. Every case checks the scope, note and count printed and
+    filter-repo's --refs; with git-filter-repo also the refs that moved, the
+    other refs' reflogs and old objects, and what the rewrite wrote."""
+    cases = [(mode, extra) for mode in _MODES for extra in
+             ([], ["--all-refs"], ["--all-refs", "--stop-at", "main"])]
     problems = []
-    if _branch_tip(d, "feature") == before["feature"]:
-        problems.append("the current branch was not rewritten")
-    for ref in ("main", "other"):
-        if _branch_tip(d, ref) != before[ref]:
-            problems.append(f"{ref} moved")
-        if not reflogs[ref] or _reflog(d, ref) != reflogs[ref]:
-            problems.append(f"{ref}'s reflog changed")
-    for ref in ("other", "feature"):
-        if _git(d, "cat-file", "-e", before[ref]).returncode != 0:
-            problems.append(f"{ref}'s old tip was pruned")
-    scope = _scope_line(out, mode)
-    if scope != f"[{mode[2:]}] scope: the current branch — refs/heads/feature":
-        problems.append(f"scope line {scope!r}")
-    if not scope or not 0 <= out.find(scope) < started:
-        problems.append(f"scope at {out.find(scope)}, filter-repo at {started}")
-    assert not problems, f"{mode}: {problems}\n{out}"
+    for i, (mode, extra) in enumerate(cases + [("--older", ["--all-refs", "--recent", "1", *NEW])]):
+        d = _fixture(os.path.join(tmp, str(i)))
+        before = {ref: _tip(d, ref) for ref in _REFS}
+        reflogs = [_git(d, "reflog", "--format=%H", ref).stdout for ref in ("main", "other")]
+        code, out, runs = _main_in(d, *extra, *_MODES[mode][0])
+        kind, tag, stop = 2 if "--stop-at" in extra else int("--all-refs" in extra), f"[{mode[2:]}]", before["main"]
+        here = f"{tag} scope: the current branch — refs/heads/feature"
+        scope, note, bound = [
+            (here, f"{tag} Other refs are untouched. Pass --all-refs to rewrite the whole repository.", "HEAD"),
+            (f"{tag} scope: every ref in the repository — refs/heads/feature, refs/heads/main, "
+             "refs/heads/other, refs/remotes/origin/main", None, None),
+            (f"{here}, bounded to {stop[:7]}..HEAD (--all-refs has no effect with --stop-at)",
+             f"{tag} Other refs are untouched.", f"{stop}..HEAD")][kind]
+        line = next((x for x in out.splitlines() if x.startswith(f"{tag} scope: ")), "")
+        argv, (wrote, counted, counts) = runs[0][1] if runs else [], _MODES[mode][1:]
+        checks = {
+            "exit status": code == 0, "scope line": line == scope,
+            "note": note in out.splitlines() if note else "Other refs are untouched" not in out,
+            "scope before the pass": bool(runs) and 0 <= out.find(line) < runs[0][0],
+            "--refs": (argv[argv.index("--refs") + 1] if "--refs" in argv else None) == bound,
+            "count": not counts or counted.format(counts[kind]) in out}
+        if shutil.which("git-filter-repo"):
+            moved = {ref for ref in _REFS if _tip(d, ref) != before[ref]}
+            other = _git(d, "log", "-1", "--format=%B", "other").stdout
+            checks.update({
+                "refs moved": {"feature", "other"} <= moved if kind == 1 else moved == {"feature"},
+                "reflogs": kind == 1 or all(reflogs) and reflogs == [
+                    _git(d, "reflog", "--format=%H", ref).stdout for ref in ("main", "other")],
+                "old objects": kind == 1 or all(
+                    _git(d, "cat-file", "-e", before[ref]).returncode == 0 for ref in ("feature", "main")),
+                "rewrite": kind == 2 or wrote in _git(d, "log", f"--format={_LOG}").stdout,
+                "other's own commit": kind != 1 or mode not in ("--all", "--older")
+                or ("By: " in other) == (mode == "--all")})
+        failed = [name for name, ok in checks.items() if not ok]
+        if failed:
+            problems.append(f"{mode} {extra}: {failed}\n{out}")
+    assert not problems, "\n".join(problems)
 
 
-def test_older_leaves_ancestor_branches_alone(tmp):
-    _leaves_ancestor_branches_alone(tmp, "--older")
-
-
-def test_all_leaves_ancestor_branches_alone(tmp):
-    _leaves_ancestor_branches_alone(tmp, "--all")
-
-
-def _all_refs_rewrites_the_other_branch(tmp, mode):
-    _require_filter_repo()
-    d = _shared_checkout(tmp)
-    before_main = _branch_tip(d, "main")
-    before_other = _branch_tip(d, "other")
-    out = _reauthor(d, "--all-refs", *_MODES[mode]).stdout
-    assert _branch_tip(d, "main") != before_main, f"{mode}: main kept\n{out}"
-    assert _branch_tip(d, "other") != before_other, \
-        f"{mode}: --all-refs left the other branch alone\n{out}"
-    assert "every ref in the repository" in _scope_line(out, mode), out
-    assert "Other refs are untouched" not in out, out
-    # What each mode does to a commit that is only on the other branch.
-    other_tip = _git(d, "log", "-1", "--format=%B", "other").stdout
-    if mode == "--all":
-        assert f"Co-Authored-By: {NEW[0]} <{NEW[1]}>" in other_tip, other_tip
-    if mode == "--older":
-        assert "Co-Authored-By" not in other_tip, \
-            f"--older filled a gap off the current branch\n{other_tip}"
-
-
-def test_reauthor_all_refs_rewrites_the_other_branch(tmp):
-    _all_refs_rewrites_the_other_branch(tmp, "--reauthor")
-
-
-def test_recommitter_all_refs_rewrites_the_other_branch(tmp):
-    _all_refs_rewrites_the_other_branch(tmp, "--recommitter")
-
-
-def test_older_all_refs_rewrites_the_other_branch(tmp):
-    _all_refs_rewrites_the_other_branch(tmp, "--older")
-
-
-def test_all_all_refs_rewrites_the_other_branch(tmp):
-    _all_refs_rewrites_the_other_branch(tmp, "--all")
-
-
-def _stop_at_problems(out, mode, stop):
-    """What is wrong with `mode`'s scope report under --stop-at, if anything:
-    it names the current branch alone, the <stop>..HEAD bound and that
-    --all-refs does nothing there."""
-    scope = _scope_line(out, mode)
-    problems = [f"{mode}: scope line {scope!r}"
-                for part in ("the current branch", "refs/heads/main",
-                             f"bounded to {stop[:7]}..HEAD",
-                             "(--all-refs has no effect with --stop-at)")
-                if part not in scope]
-    if "refs/heads/other" in scope or "every ref" in scope:
-        problems.append(f"{mode}: scope line names other refs: {scope!r}")
-    if f"[{mode[2:]}] Other refs are untouched." not in out.splitlines():
-        problems.append(f"{mode}: no plain untouched-refs note")
-    return problems
-
-
-def _stop_at_keeps_all_refs_on_the_current_branch(tmp, mode):
-    """--stop-at's <stop>..HEAD bound wins over --all-refs, so a branch
-    holding the rewritten commit plus its own is left alone, and the
-    printed scope says so."""
-    _require_filter_repo()
-    d = _repo(os.path.join(tmp, "r"), OLD, OLD)
-    stop = _head(d)
-    _commit(d, OLD, OLD, f"main work\n\n{TRAILER}")
-    assert _git(d, "checkout", "-q", "-b", "other").returncode == 0
-    _commit(d, OLD, OLD, "other work")
-    assert _git(d, "checkout", "-q", "main").returncode == 0
-    before_main, before_other = _branch_tip(d, "main"), _branch_tip(d, "other")
-    out = _reauthor(d, "--all-refs", "--stop-at", stop, *_MODES[mode]).stdout
-    assert _branch_tip(d, "main") != before_main, f"{mode}: main kept\n{out}"
-    assert _branch_tip(d, "other") == before_other, \
-        f"{mode}: --stop-at did not bound it\n{out}"
-    problems = _stop_at_problems(out, mode, stop)
-    assert not problems, f"{problems}\n{out}"
-
-
-def test_stop_at_keeps_reauthor_all_refs_on_the_current_branch(tmp):
-    _stop_at_keeps_all_refs_on_the_current_branch(tmp, "--reauthor")
-
-
-def test_stop_at_keeps_rename_all_refs_on_the_current_branch(tmp):
-    _stop_at_keeps_all_refs_on_the_current_branch(tmp, "--rename")
-
-
-def _fake_filter_repo(tmp):
-    """-> (env, argv file): a git-filter-repo that records its arguments,
-    prints a marker to stderr and fails, so nothing is rewritten and the
-    marker shows where in reauthor's output the rewrite was attempted."""
-    if os.name == "nt":
-        _util.skip("the fake filter-repo wrapper uses a POSIX shell")
-    wrappers = os.path.join(tmp, "bin")
-    os.makedirs(wrappers)
-    argv = os.path.join(tmp, "argv")
-    fake = os.path.join(wrappers, "git-filter-repo")
-    with open(fake, "w", encoding="utf-8") as f:
-        f.write("#!/bin/sh\n"
-                "if [ \"$1\" = \"--help\" ]; then exit 0; fi\n"
-                f"printf '%s\\n' \"$@\" > '{argv}'\n"
-                "echo FILTER-REPO-RAN >&2\n"
-                "exit 9\n")
-    os.chmod(fake, 0o700)
-    return {**os.environ, "PATH": wrappers + os.pathsep + os.environ["PATH"]}, argv
-
-
-def _run_with(env, d, *args):
-    return subprocess.run(
-        [sys.executable, os.path.join(_util.SCRIPTS, "reauthor.py"), *args],
-        cwd=d, env=env, capture_output=True, text=True, check=False,
-        timeout=60).stdout
-
-
-def _argv(path):
-    if not os.path.exists(path):
-        return None
-    with open(path, encoding="utf-8") as f:
-        lines = f.read().splitlines()
-    os.remove(path)
-    return lines
-
-
-def test_each_mode_states_its_scope_before_filter_repo_runs(tmp):
-    _require_git()
-    env, argv = _fake_filter_repo(tmp)
-    problems = []
-    for mode, args in _MODES.items():
-        d = _shared_checkout(os.path.join(tmp, mode[2:]))
-        out = _run_with(env, d, *args)
-        scope = out.find(_scope_line(out, mode) or "\0")
-        ran = out.find("FILTER-REPO-RAN")
-        if not 0 <= scope < ran:
-            problems.append(f"{mode}: scope at {scope}, rewrite at {ran}")
-        command = _argv(argv) or []
-        if "--refs" not in command or \
-                command[command.index("--refs") + 1] != "HEAD":
-            problems.append(f"{mode}: filter-repo ran without --refs HEAD")
-        if f"[{mode[2:]}] Other refs are untouched. Pass --all-refs to " \
-                "rewrite the whole repository." not in out.splitlines():
-            problems.append(f"{mode}: no note that other refs are untouched")
-    assert not problems, problems
-
-
-def test_each_mode_states_the_stop_at_bound_in_its_scope(tmp):
-    _require_git()
-    env, argv = _fake_filter_repo(tmp)
-    problems = []
-    for mode, args in _MODES.items():
-        d = _shared_checkout(os.path.join(tmp, mode[2:]))
-        stop = _git(d, "rev-parse", "HEAD~1").stdout.strip()
-        # A trailerless commit after the stop, so --older has a gap to fill.
-        _commit(d, OLD, OLD, "late work")
-        problems += _stop_at_problems(
-            _run_with(env, d, "--all-refs", "--stop-at", stop, *args),
-            mode, stop)
-        command = _argv(argv) or []
-        if "--refs" not in command or \
-                command[command.index("--refs") + 1] != f"{stop}..HEAD":
-            problems.append(f"{mode}: filter-repo ran without --refs "
-                            f"<stop>..HEAD: {command}")
-    assert not problems, problems
-
-
-def test_all_refs_with_recent_and_a_mode_it_widens_is_accepted(tmp):
-    """The near miss of the --recent-only refusal: --recent beside a mode
-    --all-refs widens is a valid request."""
-    _require_git()
-    env, argv = _fake_filter_repo(tmp)
-    d = _shared_checkout(tmp)
-    out = _run_with(env, d, "--all-refs", "--recent", "1", *NEW,
-                    *_MODES["--older"])
-    assert "ERROR: --all-refs" not in out, out
-    command = _argv(argv)
-    assert command is not None and "--refs" not in command, f"{command}\n{out}"
-
-
-def test_all_refs_lifts_the_refs_limit_for_each_mode(tmp):
-    _require_git()
-    env, argv = _fake_filter_repo(tmp)
-    problems = []
-    for mode, args in _MODES.items():
-        d = _shared_checkout(os.path.join(tmp, mode[2:]))
-        out = _run_with(env, d, "--all-refs", *args)
-        command = _argv(argv)
-        if command is None:
-            problems.append(f"{mode}: filter-repo never ran\n{out}")
-        elif "--refs" in command:
-            problems.append(f"{mode}: --all-refs still passed --refs")
-        if "every ref in the repository" not in _scope_line(out, mode):
-            problems.append(f"{mode}: scope line {_scope_line(out, mode)!r}")
-    assert not problems, problems
-
-
-def _old_identity_only_on_other(d):
-    """`main` holds nothing of OLD's; `other` holds one commit by OLD."""
-    ident = ("Dev", "dev@example.com")
-    _repo(d, ident, ident)
-    assert _git(d, "checkout", "-q", "-b", "other").returncode == 0
-    _commit(d, OLD, OLD, "other work")
-    assert _git(d, "checkout", "-q", "main").returncode == 0
-    return d
-
-
-def test_identity_preflight_counts_only_the_current_branch(tmp):
-    """The preflight count and its zero-match skip describe the pass that
-    runs, so they walk what that pass rewrites."""
-    _require_git()
-    d = _old_identity_only_on_other(tmp)
-    other = _branch_tip(d, "other")
-    with _in(d):
-        for field in ("author", "committer"):
-            assert _RA.matching_identity_commits(field, *OLD) == [], field
-            assert _RA.matching_identity_commits(
-                field, *OLD, all_refs=True) == [other], field
-
-
-def test_identity_count_follows_all_refs_at_the_call_site(tmp):
-    _require_git()
-    env, argv = _fake_filter_repo(tmp)
-    d = _old_identity_only_on_other(os.path.join(tmp, "r"))
-    for mode in ("--reauthor", "--recommitter"):
-        out = _run_with(env, d, *_MODES[mode])
-        assert "0 matching commits; history left untouched" in out, out
-        assert _argv(argv) is None, f"{mode}: filter-repo ran on no match"
-        out = _run_with(env, d, "--all-refs", *_MODES[mode])
-        assert "1 matching commit will be rewritten" in out, out
-        assert _argv(argv) is not None, f"{mode}: --all-refs skipped"
-
-
-def _refused(d, *args):
-    before = _head(d)
-    r = subprocess.run(
-        [sys.executable, os.path.join(_util.SCRIPTS, "reauthor.py"), *args],
-        cwd=d, capture_output=True, text=True, check=False, timeout=60)
-    assert r.returncode == 1, f"{args}: exit {r.returncode}\n{r.stdout}"
-    assert _head(d) == before, f"{args} rewrote HEAD"
-    return r.stdout.splitlines()
-
-
-def test_all_refs_with_only_recent_is_refused(tmp):
-    """--recent rebases HEAD only, so --all-refs would widen nothing."""
-    _require_git()
-    d = _repo(os.path.join(tmp, "r"), OLD, OLD)
-    _commit(d, OLD, OLD, "second")
-    out = _refused(d, "--all-refs", "--recent", "1", *NEW)
-    assert "ERROR: --all-refs widens --older, --all, --rename, --reauthor "\
-        "and --recommitter; none of them was given." in out, out
-
-
-def test_dry_run_still_scopes_rename_only(tmp):
-    _require_git()
-    d = _repo(os.path.join(tmp, "r"), OLD, OLD)
-    out = _refused(d, "--dry-run", *_MODES["--reauthor"])
-    assert "ERROR: --dry-run currently scopes --rename only." in out, out
+def test_runs_that_rewrite_nothing(tmp):
+    """--all-refs beside --recent alone widens nothing and --dry-run scopes
+    only --rename, so both are refused; a --rename dry run, one matching
+    nothing, and one whose --stop-at range holds no match stop after their
+    preflight. Outside a repository rename_scope reports nothing."""
+    d = _fixture(tmp)
+    head, rename, none = _tip(d, "HEAD"), _MODES["--rename"][0], "[rename] Nothing to rename — not running filter-repo."
+    for args, code, line in (
+            (["--all-refs", "--recent", "1", *NEW], 1, "ERROR: --all-refs widens --older, --all, --rename, "
+             "--reauthor and --recommitter; none of them was given."),
+            (["--dry-run", *_MODES["--reauthor"][0]], 1, "ERROR: --dry-run currently scopes --rename only."),
+            (["--dry-run", *rename], 0, "[rename] --dry-run: stopping before any rewrite."),
+            (["--rename", "Nobody", "n@example.com", *NEW], 0, none),
+            (["--stop-at", "HEAD~1", *rename], 0, none)):
+        status, out, runs = _main_in(d, *args)
+        assert (status, runs, _tip(d, "HEAD")) == (code, [], head) and line in out.splitlines(), (args, out)
+    with _in(tmp):
+        assert _RA.rename_scope("A", "a@x", False) == (None, [])
 
 
 def main():
