@@ -31,15 +31,18 @@ python3 run_tests.py                                             # the suite
 git ls-files -co --exclude-standard '*.py' | xargs pylint        # lint
 git ls-files -co --exclude-standard '*.py' | xargs pycodestyle   # lint
 pyright                                                          # types
-pip-audit -r requirements-dev.txt -r requirements-test.txt       # audit
+for m in requirements*.txt; do pip-audit --disable-pip -r $m; done # audit
 actionlint .github/workflows/*.yml && zizmor .github/workflows/  # workflows
 ```
 
-`pip install -r requirements-dev.txt -r requirements-test.txt` gets the
-pinned toolchain. Use `-co --exclude-standard`, not a bare `git ls-files`:
-a brand-new module is untracked until you stage it, and pylint would
-otherwise report a clean run over every file except the one you just
-wrote.
+`pip install --require-hashes -r requirements-dev.txt`, then the same with
+`requirements-test.txt` (one manifest per command), gets the hash-pinned
+toolchain CI runs on Linux and Python 3.13; each CI tool has its own
+`requirements-*.txt`.
+
+Use `-co --exclude-standard`, not a bare `git ls-files`: a brand-new
+module is untracked until you stage it, and pylint would otherwise report
+a clean run over every file except the one you just wrote.
 
 Coverage:
 
@@ -63,7 +66,7 @@ never lower it to turn a build green.
 | `tests` | Every pull request and every push to `main` not limited to Markdown, `LICENSE` or `.gitignore`, like `lint`, `types` and `audit`, so each commit gets one run. `run_tests.py` across every OS × Python pair, plus a single-run coverage job — the matrix would otherwise report the same coverage number once per pair. |
 | `lint` / `types` | pylint + pycodestyle, and pyright. |
 | `codeql` | Security analysis of the Python package and the workflows (`actions`). Findings go to the Security tab, never the build. Runs on every push to any branch, whatever files it touches, and on fork pull requests; a pull request from this repository skips it, as its head's push already published `analyze (python)`. Weekly cron on top of push, because a query published today would otherwise only ever run against files touched after it shipped. |
-| `audit` | `pip-audit` over both requirements files, resolving the full transitive tree. **Daily** cron: this answers "is a version we froze months ago still safe", and that answer changes with no commit here to hang it on. |
+| `audit` | `pip-audit` over every requirements manifest, each of which hash-pins its tool's full transitive tree. **Daily** cron: this answers "is a version we froze months ago still safe", and that answer changes with no commit here to hang it on. |
 | `scorecard` | OpenSSF Scorecard on the default branch, weekly and by dispatch; results go to the Security tab. A trend signal, not a gate. |
 | `actionlint` | Every pull request, checked out at its head rather than GitHub's test merge, and every push to `main` (a push or manual dispatch checks out the event's own commit). `actionlint` + `zizmor` over the workflow YAML: a broken workflow does not go red, it silently stops running. Before them, the `.github/scripts` suites (`python3 -m unittest discover -s .github/scripts -p 'test_*.py'`) and three gate-integrity checks: no tracked file carries a merge-conflict marker; the head carries every commit `main` gained on a file a required check reads (`gate_base_freshness.py`); no outgoing commit (a pull request's `origin/main..HEAD`, a push's `before..HEAD`) pairs a workflow-name scope with a type other than `ci` (`commit_scopes.py`). Last, a digest-verified gitleaks scan of the checked-out head's full history. No aggregate check exists, so this job hosts the scan: requiring its `actionlint` check makes the scan gate merges. |
 | `secrets` | Daily cron only: the same gitleaks scan over every branch's history, for commits no pull request or `main` push ran it on. |
