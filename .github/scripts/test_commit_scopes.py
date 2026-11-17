@@ -79,6 +79,16 @@ class ThisRepository(Fixture):
         self.assertEqual(scopes.workflow_name_set(ROOT), {
             "actionlint", "audit", "codeql", "lint", "release", "tag", "tests", "types"})
 
+    def test_the_workflow_hands_the_push_tip_under_the_name_the_check_reads(self) -> None:
+        lines = git(ROOT, "show", "HEAD:.github/workflows/actionlint.yml").splitlines()
+        run = [index for index, line in enumerate(lines)
+               if line.strip() == "run: python3 .github/scripts/commit_scopes.py"]
+        self.assertEqual(len(run), 1)
+        step = lines[max(i for i in range(run[0]) if lines[i].startswith("      - ")):run[0]]
+        env = dict(line.strip().split(": ", 1) for line in step[step.index("        env:") + 1:]
+                   if line.startswith(" " * 10) and not line.strip().startswith("#"))
+        self.assertEqual(env, {scopes.PUSH_BEFORE: "${{ github.event.before }}"})
+
 
 class Subjects(Fixture):
     def test_workflow_scope_with_a_non_ci_type_is_red(self) -> None:

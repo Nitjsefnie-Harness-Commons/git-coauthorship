@@ -19,6 +19,9 @@ BASE_BRANCH = "main"
 
 WORKFLOW_DIR = ".github/workflows"
 
+# Set by the actionlint workflow's scope step to github.event.before.
+PUSH_BEFORE = "GIT_COAUTHORSHIP_PUSH_BEFORE"
+
 
 class GateError(Exception):
     """The answer could not be established."""
@@ -224,7 +227,7 @@ def main(argv: list[str]) -> int:
             return 2
     try:
         return check(root, os.environ.get("GITHUB_EVENT_NAME", ""),
-                     os.environ.get("GIT_COAUTHORSHIP_PUSH_BEFORE", ""))
+                     os.environ.get(PUSH_BEFORE, ""))
     except GateError as refusal:
         print(f"commit scopes: {refusal}", file=sys.stderr)
         return 1
