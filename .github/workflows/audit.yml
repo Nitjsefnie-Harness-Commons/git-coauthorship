@@ -1,19 +1,17 @@
 name: audit
 
-# Dependency vulnerability gate: pip-audit resolves each requirements file
-# to its full transitive tree and checks every resolved version against the
-# PyPI advisory database and OSV.
+# Dependency vulnerability gate: pip-audit checks every version each
+# requirements manifest pins against the PyPI advisory database.
 #
 # There is NO backend/requirements.txt here: the runtime is pure stdlib,
-# with zero third-party imports. So this gate covers the toolchain — the
-# lint, type-check and coverage pins — which is a smaller surface than the
-# sibling repos have but not an empty one: those tools run in CI with the
-# repository token, and a compromised one is a supply-chain problem even
-# though it never ships.
+# with zero third-party imports. So this gate covers the toolchain — every
+# CI tool's manifest — which is a smaller surface than the sibling repos
+# have but not an empty one: those tools run in CI with the repository
+# token, and a compromised one is a supply-chain problem even though it
+# never ships.
 #
-# Resolution is still the point rather than reading the pinned lines: a
-# linter drags in a dependency tree of its own, and that is where an
-# advisory lands.
+# Each manifest pins its tool's full transitive tree: a linter drags in a
+# dependency tree of its own, and that is where an advisory lands.
 #
 # WHY THE CRON IS THE IMPORTANT TRIGGER. Every other gate in this repo
 # answers "did this commit break something", so push is the natural trigger.
@@ -65,52 +63,62 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
+          cache-dependency-path: requirements-audit.txt
 
       - name: Install pip-audit
-        run: |
-          python -m pip install --upgrade pip
-          pip install pip-audit==2.10.1
+        run: python -m pip install --require-hashes -r requirements-audit.txt
 
       - name: Audit dependencies
-        # Both requirements files in one invocation so a package
-        # constrained by two of them is resolved once, consistently — the
-        # same way an install would see it.
+        # One invocation per manifest, as CI installs them. --disable-pip
+        # audits the hashed pins as written; resolving them instead audits
+        # only what pip adds to a scratch venv it first upgrades, so a pin
+        # that venv already holds (setuptools, packaging) goes unaudited.
         #
         # No --ignore-vuln entries at present. Each one added here must
         # carry a comment naming the advisory, why it is not fixable, and
         # what would let it be removed.
         #
-        # THE RETRY IS NARROW ON PURPOSE. pip-audit resolves against PyPI
-        # and the advisory database over the network, and a reset
-        # connection produces the same exit status as a real finding. A
-        # blanket `retry 3` would therefore re-run a genuine vulnerability
-        # three times before reporting it, and — worse — a gate that goes
-        # red for reasons unrelated to its subject is one people learn to
-        # ignore. So this retries ONLY when the output carries a transport
-        # error, and reports anything else immediately and verbatim.
+        # THE RETRY IS NARROW ON PURPOSE. pip-audit queries the advisory
+        # database over the network, and a reset connection produces the
+        # same exit status as a real finding. A blanket `retry 3` would
+        # therefore re-run a genuine vulnerability three times before
+        # reporting it, and — worse — a gate that goes red for reasons
+        # unrelated to its subject is one people learn to ignore. So this
+        # retries ONLY when the output carries a transport error, and
+        # reports anything else immediately and verbatim.
         run: |
-          for attempt in 1 2 3; do
-            if pip-audit \
-                 --progress-spinner off \
-                 --requirement requirements-dev.txt \
-                 --requirement requirements-test.txt \
-                 > audit.out 2>&1; then
-              cat audit.out
-              exit 0
-            fi
+          shopt -s nullglob
+          manifests=(requirements*.txt)
+          if [ "${#manifests[@]}" -eq 0 ]; then
+            echo "no requirements manifest found — refusing to report a clean audit" >&2
+            exit 1
+          fi
 
-            if grep -qiE 'connection (aborted|reset|error)|read timed out|temporary failure in name resolution' audit.out; then
-              echo "attempt $attempt: transport failure talking to PyPI, retrying"
-              tail -n 5 audit.out
-              sleep $(( attempt * 15 ))
-              continue
-            fi
+          for manifest in "${manifests[@]}"; do
+            for attempt in 1 2 3; do
+              if pip-audit \
+                   --progress-spinner off \
+                   --disable-pip \
+                   --require-hashes \
+                   --requirement "$manifest" \
+                   > audit.out 2>&1; then
+                cat audit.out
+                continue 2
+              fi
 
-            echo "pip-audit reported findings:" >&2
+              if grep -qiE 'connection (aborted|reset|error)|read timed out|temporary failure in name resolution' audit.out; then
+                echo "$manifest attempt $attempt: transport failure talking to PyPI, retrying"
+                tail -n 5 audit.out
+                sleep $(( attempt * 15 ))
+                continue
+              fi
+
+              echo "pip-audit reported findings in $manifest:" >&2
+              cat audit.out >&2
+              exit 1
+            done
+
+            echo "pip-audit could not reach PyPI for $manifest after 3 attempts:" >&2
             cat audit.out >&2
             exit 1
           done
-
-          echo "pip-audit could not reach PyPI after 3 attempts:" >&2
-          cat audit.out >&2
-          exit 1
