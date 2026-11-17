@@ -66,8 +66,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # A pull request's head, not GitHub's test merge: that merge has
-          # main as a parent, so a stale head would pass the checks below.
+          # The PR head: GitHub's test merge has main as a parent.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           # Full history: the freshness and scope checks read main and the
           # pushed range, and a history read inherits the checkout's depth.
