@@ -109,17 +109,10 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-*.txt
 
-      - name: Install the coverage toolchain and the project
+      - name: Install the coverage toolchain
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-test.txt
-          # `.` too, for the project's own runtime dependencies. Without it a
-          # suite that IMPORTS the package cannot import it at all, every
-          # suite dies on ModuleNotFoundError, and the job goes on to report
-          # the resulting 1% as though it were a measurement. The tests put
-          # the repo root on sys.path themselves, so the source tree is still
-          # what gets measured — this install is here for the deps.
-          python -m pip install .
 
       - name: Measure
         id: measure
