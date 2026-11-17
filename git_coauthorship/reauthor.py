@@ -6,14 +6,19 @@ git-coauthorship wheel. It is intended for agent-authored repositories and
 keeps the original rewrite behavior intact.
 
 --recent   Rebase last N commits; add trailer if missing.
---older    Fill ALL gaps. Each gap looks backward to the nearest
+--older    Fill ALL gaps in the current branch's history. Each gap looks
+           backward to the nearest
            coauthored commit for its author:
              - If that trailer matches --older-inherit REGEX → inherit it
              - Otherwise → use the default --older value
            The default regex is ``Opus`` solely for compatibility with this
            historical Claude workflow; it is not a generic git rule.
-           Existing coauthored commits are never touched. Scoped to the
-           current branch unless --all-refs is given.
+           Existing coauthored commits are never touched. Gaps are found
+           and filled on the current branch's history only, and only the
+           current branch is rewritten. With --all-refs every ref is
+           rewritten too, but nothing is filled off the current branch:
+           a commit only on another ref keeps its message, and gets a
+           new SHA only when it descends from a filled commit.
 --older-inherit
            Regex selecting which existing boundary trailer --older inherits.
            Default: ``Opus`` (legacy behavior). Use a provider/model regex for
@@ -32,7 +37,8 @@ keeps the original rewrite behavior intact.
            and --dry-run stops after printing.
 --all-refs Modifier for --older, --all, --rename, --reauthor and
            --recommitter: rewrite every ref in the repository, not only the
-           current branch. Without it each of those modes rewrites the
+           current branch (--older still fills gaps on the current
+           branch's history only). Without it each of those modes rewrites the
            current branch alone and prints that scope before acting; given
            with none of them (--recent only ever rebases the current
            branch) it is refused. Reflogs are expired and pre-rewrite
@@ -593,18 +599,27 @@ def scope_refs(all_refs):
     return [head or "HEAD (detached)"]
 
 
-def scope_lines(mode, all_refs, refs):
-    """-> (the scope line, the untouched-refs note or None) for `mode`."""
+def scope_lines(mode, all_refs, refs, stop_full=None):
+    """-> (the scope line, the untouched-refs note or None) for `mode`.
+
+    Mirrors refs_args: --stop-at bounds the pass to <stop>..HEAD on the
+    current branch whether or not --all-refs was given."""
+    listed = ', '.join(refs) or 'no refs'
+    if stop_full is not None:
+        return (f"[{mode}] scope: the current branch — {listed}, bounded to "
+                f"{stop_full[:7]}..HEAD (--all-refs has no effect with "
+                "--stop-at)"), f"[{mode}] Other refs are untouched."
     where = "every ref in the repository" if all_refs else "the current branch"
-    scope = f"[{mode}] scope: {where} — {', '.join(refs) or 'no refs'}"
+    scope = f"[{mode}] scope: {where} — {listed}"
     if all_refs:
         return scope, None
     return scope, (f"[{mode}] Other refs are untouched. Pass --all-refs to "
                    "rewrite the whole repository.")
 
 
-def announce_scope(mode, all_refs):
-    for line in scope_lines(mode, all_refs, scope_refs(all_refs)):
+def announce_scope(mode, all_refs, stop_full=None):
+    refs = scope_refs(all_refs and stop_full is None)
+    for line in scope_lines(mode, all_refs, refs, stop_full):
         if line:
             print(line)
 
@@ -744,8 +759,9 @@ def rename_trailer(old_name, old_email, new_name, new_email, stop_full=None,
             return
         cfg["newer"] = list(scope)
 
-    matches, refs = rename_scope(old_name, old_email, all_refs, scope)
-    scope_line, untouched = scope_lines("rename", all_refs, refs)
+    matches, refs = rename_scope(old_name, old_email,
+                                 all_refs and stop_full is None, scope)
+    scope_line, untouched = scope_lines("rename", all_refs, refs, stop_full)
     print(scope_line)
     if matches is None:
         print("[rename] could not count matching commits; git did not answer.")
@@ -980,7 +996,10 @@ def main():
         action="store_true",
         help="Modifier for --older, --all, --rename, --reauthor and "
         "--recommitter: rewrite every ref in the repository, not only the "
-        "current branch. Expires reflogs and prunes the pre-rewrite objects.",
+        "current branch, expiring reflogs and pruning the pre-rewrite "
+        "objects (--older still fills gaps on the current branch only). "
+        "No effect with --stop-at, which bounds every mode to "
+        "<stop>..HEAD on the current branch.",
     )
     ap.add_argument(
         "--dry-run",
@@ -1047,13 +1066,13 @@ def main():
                 f"default older = {older_default}; inherit regex = "
                 f"{args.older_inherit!r}"
             )
-            announce_scope("older", args.all_refs)
+            announce_scope("older", args.all_refs, stop_full)
             filter_repo_with_mapping(mapping, stop_full=stop_full,
                                      all_refs=args.all_refs)
 
         if args.all:
             print(f"[filter-repo] Tagging ALL commits with: {build_trailer(args.all[0], args.all[1])}")
-            announce_scope("all", args.all_refs)
+            announce_scope("all", args.all_refs, stop_full)
             filter_all(args.all[0], args.all[1], stop_full=stop_full,
                        all_refs=args.all_refs)
 
@@ -1073,7 +1092,7 @@ def main():
             print(
                 f"[filter-repo] Reauthoring: author {on} <{oe}>  ->  {nn} <{ne}>"
             )
-            announce_scope("reauthor", args.all_refs)
+            announce_scope("reauthor", args.all_refs, stop_full)
             reauthor(on, oe, nn, ne, stop_full=stop_full,
                      all_refs=args.all_refs)
 
@@ -1082,7 +1101,7 @@ def main():
             print(
                 f"[filter-repo] Recommitting: committer {on} <{oe}>  ->  {nn} <{ne}>"
             )
-            announce_scope("recommitter", args.all_refs)
+            announce_scope("recommitter", args.all_refs, stop_full)
             recommitter(on, oe, nn, ne, stop_full=stop_full,
                         all_refs=args.all_refs)
 
