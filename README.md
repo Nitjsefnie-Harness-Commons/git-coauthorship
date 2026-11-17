@@ -63,7 +63,7 @@ never lower it to turn a build green.
 | `codeql` | Security analysis (Python only — no JS here). Findings go to the Security tab, never the build. Weekly cron on top of push, because a query published today would otherwise only ever run against files touched after it shipped. |
 | `audit` | `pip-audit` over both requirements files, resolving the full transitive tree. **Daily** cron: this answers "is a version we froze months ago still safe", and that answer changes with no commit here to hang it on. |
 | `actionlint` | `actionlint` + `zizmor` over the workflow YAML. A broken workflow does not go red, it silently stops running. |
-| `tag` | Watches `git_coauthorship/__init__.py`. When `__version__` changes on `main`, it waits for every other check on that commit and then pushes `v<version>`. |
+| `tag` | Runs on every push to `main` the gates run on. When `__version__` has no `v<version>` tag yet, it waits for every other check on that commit and then pushes the tag, so a bump whose own commit was red is tagged by the later commit that turns `main` green. A push that leaves an already-tagged version unchanged ends green without tagging. |
 | `release` | Fires on that tag: runs every suite, builds the wheel, and publishes `SHA256SUMS` beside it. |
 | `claim` | `Nitjsefnie-Actions/claim`: `/claim` assigns the commenter to an open, unassigned issue; `/unclaim` (or `/release`) removes the commenter's own assignment. |
 | `pr gate` | `Nitjsefnie-Actions/pr-gate`: checks a pull-request description against `.github/PULL_REQUEST_TEMPLATE.md` and its assigned issues, plus commit attribution and Conventional Commits subjects. |
