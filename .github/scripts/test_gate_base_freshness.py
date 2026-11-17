@@ -288,12 +288,23 @@ class Derivation(Fixture):
 
     def test_a_working_directory_resolves_the_steps_paths_under_it(self) -> None:
         moved = TESTS_YML.replace("      - run: python run_tests.py\n",
-                                  "      - run: python run_tests.py\n"
+                                  "      - run: python run_tests.py ../setup.cfg\n"
                                   "        working-directory: sub\n", 1)
         repo = self.repo({".github/workflows/actionlint.yml": actionlint_yml("cat README.md"),
-                          ".github/workflows/tests.yml": moved,
+                          ".github/workflows/tests.yml": moved, "setup.cfg": "\n",
                           "sub/run_tests.py": "\n", "README.md": "#\n"})
-        self.assertEqual(gate.gate_paths(repo), ["README.md", "sub/run_tests.py"])
+        self.assertEqual(gate.gate_paths(repo), ["README.md", "setup.cfg", "sub/run_tests.py"])
+
+    def test_a_steps_with_values_name_paths_and_its_keys_do_not(self) -> None:
+        tests = TESTS_YML.replace("      - run: python run_tests.py\n",
+                                  "      - uses: owner/action@ref\n        with:\n"
+                                  "          # a comment\n"
+                                  "          records: '.github/r.json'\n          notes: |\n"
+                                  "            see docs/n.md\n", 1)
+        repo = self.repo({".github/workflows/actionlint.yml": actionlint_yml("echo"),
+                          ".github/workflows/tests.yml": tests, ".github/r.json": "{}\n",
+                          "docs/n.md": "\n", "records": "\n", "run_tests.py": "\n"})
+        self.assertEqual(gate.gate_paths(repo), [".github/r.json", "docs/n.md", "run_tests.py"])
 
     def test_refuses_a_run_directory_it_cannot_resolve(self) -> None:
         head = "name: w\njobs:\n  actionlint:\n"
@@ -302,6 +313,8 @@ class Derivation(Fixture):
                                      "        working-directory: ${{ inputs.dir }}\n",
                 "job defaults": head + "    defaults:\n      run:\n"
                                        "        working-directory: sub\n",
+                "flow with": head + "    steps:\n      - uses: a@b\n"
+                                    "        with: {records: r.json}\n",
                 "workflow defaults": "defaults:\n  run:\n    working-directory: sub\n"
                                      + head + "    steps:\n      - run: echo\n"}.items():
             with self.subTest(why), self.assertRaises(gate.WorkflowError):
@@ -345,7 +358,8 @@ class Parser(Fixture):
                 "          # a comment bash receives\n          grep README.md\n"
                 "        if: ${{ !cancelled() }}\npermissions:\n  contents: read\n")
         self.assertEqual(self.steps(text), [{"run": "echo one\n# a comment bash receives\n"
-                                             "grep README.md", "uses": None, "dir": None}])
+                                             "grep README.md", "uses": None, "dir": None,
+                                             "with": None}])
 
     def test_the_shapes_this_repositorys_workflows_use(self) -> None:
         text = ("name: w\njobs:\n  actionlint:\n    name: lint (${{ matrix.os }})\n"
@@ -358,8 +372,9 @@ class Parser(Fixture):
                 "      - name: s\n        env:\n          X: ${{ github.sha }}\n"
                 "        working-directory: dist\n        run: python run_tests.py\n")
         self.assertEqual(self.steps(text), [
-            {"run": None, "uses": "owner/action@ref", "dir": None},
-            {"run": "python run_tests.py", "uses": None, "dir": "dist"}])
+            {"run": None, "uses": "owner/action@ref", "dir": None,
+             "with": "0\nrequirements-*.txt"},
+            {"run": "python run_tests.py", "uses": None, "dir": "dist", "with": None}])
 
     def test_refuses_shapes_it_cannot_read(self) -> None:
         head = "name: w\njobs:\n  actionlint:\n"
