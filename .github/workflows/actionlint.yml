@@ -66,6 +66,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # A pull request's head, not GitHub's test merge: that merge has
+          # main as a parent, so a stale head would pass the checks below.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           # Full history: the freshness and scope checks read main and the
           # pushed range, and a history read inherits the checkout's depth.
           fetch-depth: 0
@@ -89,7 +92,7 @@ jobs:
 
       - name: Require this head to carry main's gate-defining commits
         # Strict required checks are off, so a green head vouches only for
-        # the tree it checked out; this is the check comparing it with main.
+        # the tree it checked out; this compares that head with main.
         run: python3 .github/scripts/gate_base_freshness.py
 
       - name: Refuse a commit whose scope names a workflow outside the ci type
