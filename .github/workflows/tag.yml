@@ -8,8 +8,8 @@ name: tag
 # after bumping __version__, and a forgotten tag means a version bump that
 # never ships.
 #
-# So this composes with it rather than replacing it: it watches the one file
-# that carries the version, pushes the tag, and then STARTS release.yml by
+# So this composes with it rather than replacing it: it reads the version on
+# every push to main, pushes the tag, and then STARTS release.yml by
 # hand. That last part is not belt-and-braces: a `v*` tag pushed with the
 # built-in GITHUB_TOKEN does not trigger release.yml at all. GitHub suppresses
 # workflow runs from token-authored events so a workflow cannot loop on its
@@ -28,13 +28,22 @@ name: tag
 # has pulled cannot be unpublished — so tagging a red commit is worth
 # preventing even though release.yml would catch a failing suite later. It
 # would NOT catch a lint or type regression, which never reach that job.
+#
+# Every push the gates run on, not only one that edits __version__: a bump
+# whose own commit is red must still be tagged by whichever later commit
+# turns main green, and that commit usually touches other files. A push
+# that leaves an already-tagged version unchanged ends green at the
+# existing-tag step, before the wait, with nothing tagged or dispatched.
 
 on:
   push:
     branches: [main]
-    paths:
-      # The narrowest possible allow-list: the file that holds __version__.
-      - 'git_coauthorship/__init__.py'
+    # The gate workflows' own ignore list: on a push they skip, no check
+    # run exists for the commit, and the wait below would time out red.
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
+      - '.gitignore'
   workflow_dispatch:
     inputs:
       sha:
@@ -48,7 +57,9 @@ permissions:
 concurrency:
   # NOT cancel-in-progress: a superseded test run teaches you nothing and is
   # worth cancelling; a superseded tag run may be midway through creating a
-  # tag.
+  # tag. A PENDING run is another matter: GitHub keeps one pending run per
+  # group by default, so a newer run cancels it (grey, not red), and the
+  # newer run judges the newer tip.
   group: tag
   cancel-in-progress: false
 
@@ -90,24 +101,70 @@ jobs:
           echo "Version is $version"
 
       - name: Refuse to re-tag an existing version
+        id: existing
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
           REPO: ${{ github.repository }}
-        # An existing tag means either a mistaken edit or a rerun after a
-        # partial failure. Both want a human, and both are silent if this
-        # step is a no-op instead of an error.
+          # The branch tip before this push; empty on a dispatch.
+          BEFORE: ${{ github.event.before }}
+        # On a push that left __version__ unchanged, an existing tag means
+        # that version already shipped: the job ends green here and every
+        # later step skips. Any other existing tag (a push that set an
+        # already-shipped version, a before-push version that cannot be read,
+        # a dispatch) is a mistaken edit or a rerun after a partial failure.
+        # Both want a human, and both are silent if this step is a no-op
+        # instead of an error.
+        #
+        # gh's exit status is the same for a 404 as for any other failure, so
+        # `--include` puts the HTTP status line first: only a 404 means the
+        # tag is free, and any other failed lookup ends red rather than
+        # guessing either way.
+        #
+        # The checkout is one commit deep, so the before-push commit is
+        # fetched by SHA, as actions/checkout fetched this one. No fetch depth
+        # could promise to reach it: one push can carry any number of commits.
         run: |
-          if gh api -H "Cache-Control: no-cache" \
-               "repos/$REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists — __version__ was set to a version" >&2
-            echo "that has already shipped. Bump it further, or delete that" >&2
-            echo "tag and its release if it was cut in error." >&2
+          gh_status=0
+          response="$(gh api --include -H "Cache-Control: no-cache" \
+            "repos/$REPO/git/ref/tags/$TAG")" || gh_status=$?
+          read -r _ http_status _ <<< "${response%%$'\n'*}"
+          if [ "$gh_status" -ne 0 ]; then
+            if [ "$http_status" = 404 ]; then
+              echo "$TAG is free"
+              exit 0
+            fi
+            echo "Could not tell whether $TAG exists (HTTP ${http_status:-none})." >&2
             exit 1
           fi
-          echo "$TAG is free"
+
+          # Read the same way as the version step: import the attribute, here
+          # from the before-push commit's tree.
+          version_at() {
+            git fetch --no-tags --depth=1 origin "$1" >&2 &&
+              git archive -o "$RUNNER_TEMP/before.tar" "$1" git_coauthorship &&
+              mkdir "$RUNNER_TEMP/before" &&
+              tar -xf "$RUNNER_TEMP/before.tar" -C "$RUNNER_TEMP/before" &&
+              (cd "$RUNNER_TEMP/before" &&
+                python3 -c 'import git_coauthorship; print(git_coauthorship.__version__)')
+          }
+          if [ "$GITHUB_EVENT_NAME" = push ] &&
+             before="$(version_at "$BEFORE")" && [ "v$before" = "$TAG" ]; then
+            echo "$TAG already shipped and this push left __version__ unchanged;"
+            echo "nothing to tag."
+            echo "shipped=true" >> "$GITHUB_OUTPUT"
+            echo "\`$TAG\` already shipped; this push left \`__version__\` unchanged." \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "Tag $TAG already exists — __version__ was set to a version" >&2
+          echo "that has already shipped. Bump it further, or delete that" >&2
+          echo "tag and its release if it was cut in error." >&2
+          exit 1
 
       - name: Wait for the other gates on this commit
+        # This and the two steps after it skip on an already-shipped version.
+        if: steps.existing.outputs.shipped != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ inputs.sha || github.sha }}
@@ -157,6 +214,7 @@ jobs:
           exit 1
 
       - name: Create and push the tag
+        if: steps.existing.outputs.shipped != 'true'
         env:
           TAG: ${{ steps.version.outputs.tag }}
           SHA: ${{ inputs.sha || github.sha }}
@@ -176,6 +234,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Start the release
+        if: steps.existing.outputs.shipped != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
