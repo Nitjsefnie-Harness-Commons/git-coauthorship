@@ -160,14 +160,17 @@ jobs:
         if: steps.existing.outputs.shipped != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          SHA: ${{ inputs.sha || github.sha }}
           REPO: ${{ github.repository }}
-        # Gates: workflows here whose push trigger fires wherever this one
-        # does, read from the files, so a fast one cannot stand in for a
-        # suite not yet registered. Each needs a successful push run; every
+        # Gates, read from the files so a fast workflow cannot stand in for
+        # a suite not yet registered: each workflow here whose on.push has
+        # no paths or tags, names main if it lists branches, and ignores
+        # only paths tag.yml ignores. A form this cannot read ends red. Each
+        # gate needs a successful push run on main for this commit; every
         # other check run (bar ITSELF) must pass too. `cancelled` fails: a
         # newer push superseded this SHA, which is not a commit to release.
         run: |
+          # The checked-out commit in full: a dispatch's `sha` may be a name.
+          SHA="$(git rev-parse HEAD)"
           shopt -s nullglob
           ignore="$(yq -o=json -I=0 '.on.push."paths-ignore" // []' \
             .github/workflows/tag.yml)"
@@ -208,8 +211,9 @@ jobs:
           tab=$'\t' nl=$'\n'
           deadline=$(( SECONDS + 45 * 60 ))
           while [ "$SECONDS" -lt "$deadline" ]; do
+            query="head_sha=$SHA&event=push&branch=main&per_page=100"
             runs="$(gh api --paginate -H "Cache-Control: no-cache" \
-              "repos/$REPO/actions/runs?head_sha=$SHA&event=push&per_page=100" \
+              "repos/$REPO/actions/runs?$query" \
               --jq '.workflow_runs[]
                     | "\(.id)\t\(.path)\t\(.status)\t\(.conclusion)"')"
             checks="$(gh api --paginate \
@@ -255,9 +259,9 @@ jobs:
         if: steps.existing.outputs.shipped != 'true'
         env:
           TAG: ${{ steps.version.outputs.tag }}
-          SHA: ${{ inputs.sha || github.sha }}
         # Annotated, not lightweight: it records who created it and when.
         run: |
+          SHA="$(git rev-parse HEAD)"  # the commit the wait judged
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$TAG" -m "$TAG" "$SHA"
