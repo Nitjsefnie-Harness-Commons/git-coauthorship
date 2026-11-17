@@ -67,25 +67,6 @@ jobs:
         # the runner and maintained by GitHub. Dropping the dependency is a
         # smaller supply chain for the step that needs it least.
         #
-        # Both branches exist because the two triggers differ: a tag push
-        # creates the release, while a workflow_dispatch rerun finds it
-        # already there and must replace the assets rather than fail.
-        run: |
-          case "$GITHUB_REF" in
-            refs/tags/*) tag="${GITHUB_REF#refs/tags/}" ;;
-            *)
-              echo "Not a tag ref ($GITHUB_REF); nothing to publish." >&2
-              echo "Push a v* tag — .github/workflows/tag.yml does that" >&2
-              echo "automatically when __version__ changes." >&2
-              exit 1
-              ;;
-          esac
-
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release $tag exists; replacing its assets."
-            gh release upload "$tag" dist/*.whl dist/SHA256SUMS --clobber
-          else
-            gh release create "$tag" --title "$tag" --generate-notes \
-              dist/*.whl dist/SHA256SUMS
-          fi
-          echo "Published $tag."
+        # A second run for a published tag fails loudly and replaces
+        # nothing. Assets go only into a draft, which is published last.
+        run: bash .github/scripts/publish_release.sh
