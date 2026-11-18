@@ -80,6 +80,7 @@ target: every green push to `main` raises it to the measured total minus
 | `pr gate` | `Nitjsefnie-Actions/pr-gate`: checks a pull-request description against `.github/PULL_REQUEST_TEMPLATE.md` and its assigned issues, plus commit attribution and Conventional Commits subjects. |
 | `comment share` | `Nitjsefnie-Actions/comment-ratchet`: gates each tracked source file's comment share (target 15%) against `.github/comment-share.json`; the default branch commits its own tightened records. |
 | `size baseline` | `Nitjsefnie-Actions/size-ratchet`: gates file line counts against per-type ceilings and `.github/size-baseline.json`, and budgets the `tests/` tree's total; the default branch commits its own records. |
+| `ratchet push` | After a green `tests` push run on `main`, commits the raised coverage floor that run staged as an artifact, with the `main-push` environment's deploy key. It checks out no code and runs nothing from the tree, and drops the raise when `main` has moved on anything but the records. |
 | `pin test screen` | `Nitjsefnie-Actions/pin-guard`: lists test lines that assert on a pinned dependency version as review comments; not a gate. |
 
 **There is deliberately no speed gate here**, unlike the dashboard repos.

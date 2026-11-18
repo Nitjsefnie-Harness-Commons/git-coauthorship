@@ -61,6 +61,7 @@
 !/.github/scripts/test_gate_list.py
 !/.github/scripts/test_gate_wait.py
 !/.github/scripts/test_publish_release.py
+!/.github/scripts/test_ratchet_push.py
 !/.github/scripts/test_ratchet_thresholds.py
 !/.github/scripts/test_release_path.py
 !/.github/workflows/actionlint.yml
@@ -71,6 +72,7 @@
 !/.github/workflows/lint.yml
 !/.github/workflows/pin-guard.yml
 !/.github/workflows/pr-gate.yml
+!/.github/workflows/ratchet-push.yml
 !/.github/workflows/release.yml
 !/.github/workflows/scorecard.yml
 !/.github/workflows/secrets.yml
