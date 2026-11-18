@@ -17,40 +17,20 @@ import _util
 
 ROOT = Path(_util.SCRIPTS).parent
 PACKAGE = "git_coauthorship"
-MODULES = ("reauthor", "author_stats")
 VERSIONS = {"reauthor": "1.1.0", "author_stats": "1.0.0"}
-
-_TMP = []
-
-
-def tempdir_of():
-    return _TMP[0]
+MODULES = tuple(VERSIONS)
+with open(ROOT / "pyproject.toml", "rb") as _fh:
+    PYPROJECT = tomllib.load(_fh)
 
 
-def _run(args):
-    """Run a package module from a cwd that is not the checkout."""
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(ROOT)
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
-    return subprocess.run([sys.executable, "-m", *args], cwd=tempdir_of(),
-                          capture_output=True, text=True, env=env, check=False,
-                          timeout=120)
-
-
-def test_every_module_is_importable_by_name(tmp):
-    _TMP[:] = [tmp]
-    for name in MODULES:
-        result = _run([f"{PACKAGE}.{name}", "--version"])
-        assert result.returncode == 0, (
-            f"{name} --version exited {result.returncode}: {result.stderr}")
-
-
-def test_every_module_reports_its_own_version(tmp):
-    _TMP[:] = [tmp]
+def test_every_module_is_importable_by_name_and_reports_its_own_version(tmp):
+    """Run as a package module from a cwd that is not the checkout."""
+    env = {**os.environ, "PYTHONPATH": str(ROOT), "PYTHONDONTWRITEBYTECODE": "1"}
     for name, version in VERSIONS.items():
-        result = _run([f"{PACKAGE}.{name}", "--version"])
+        result = subprocess.run([sys.executable, "-m", f"{PACKAGE}.{name}", "--version"], cwd=tmp,
+                                capture_output=True, text=True, env=env, check=False, timeout=120)
         output = (result.stdout + result.stderr).strip()
-        assert output == f"{name} {version}", output
+        assert (result.returncode, output) == (0, f"{name} {version}"), output
 
 
 def test_every_module_has_a_main_the_entry_point_can_call(tmp):
@@ -65,9 +45,7 @@ def test_every_module_has_a_main_the_entry_point_can_call(tmp):
 
 def test_declared_console_scripts_resolve(tmp):
     """A typo here ships a wheel whose commands do not exist."""
-    with open(ROOT / "pyproject.toml", "rb") as fh:
-        cfg = tomllib.load(fh)
-    scripts = cfg["project"]["scripts"]
+    scripts = PYPROJECT["project"]["scripts"]
     assert scripts == {
         "reauthor": "git_coauthorship.reauthor:main",
         "author-stats": "git_coauthorship.author_stats:main",
@@ -82,9 +60,7 @@ def test_declared_console_scripts_resolve(tmp):
 
 
 def test_the_distribution_version_is_the_one_setuptools_reads(tmp):
-    with open(ROOT / "pyproject.toml", "rb") as fh:
-        cfg = tomllib.load(fh)
-    attr = cfg["tool"]["setuptools"]["dynamic"]["version"]["attr"]
+    attr = PYPROJECT["tool"]["setuptools"]["dynamic"]["version"]["attr"]
     assert attr == f"{PACKAGE}.__version__", attr
     init = (ROOT / PACKAGE / "__init__.py").read_text(encoding="utf-8")
     found = re.search(r'^__version__\s*=\s*"(\d+\.\d+\.\d+)"', init,
@@ -94,9 +70,7 @@ def test_the_distribution_version_is_the_one_setuptools_reads(tmp):
 
 def _requires_python_floor():
     """`requires-python` as a (major, minor) tuple, from pyproject itself."""
-    with open(ROOT / "pyproject.toml", "rb") as fh:
-        cfg = tomllib.load(fh)
-    spec = cfg["project"]["requires-python"]
+    spec = PYPROJECT["project"]["requires-python"]
     found = re.search(r">=\s*(\d+)\.(\d+)", spec)
     assert found, f"cannot read a floor out of requires-python = {spec!r}"
     return (int(found.group(1)), int(found.group(2)))
@@ -144,9 +118,7 @@ def test_no_module_uses_syntax_the_oldest_supported_python_cannot_parse(tmp):
 
 
 def test_the_package_ships_every_tool(tmp):
-    with open(ROOT / "pyproject.toml", "rb") as fh:
-        cfg = tomllib.load(fh)
-    assert cfg["tool"]["setuptools"]["packages"] == [PACKAGE]
+    assert PYPROJECT["tool"]["setuptools"]["packages"] == [PACKAGE]
     for name in MODULES:
         assert (ROOT / PACKAGE / f"{name}.py").is_file(), name
 
