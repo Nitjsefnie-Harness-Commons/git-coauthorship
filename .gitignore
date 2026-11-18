@@ -58,6 +58,7 @@
 !/.github/scripts/test_gate_list.py
 !/.github/scripts/test_gate_wait.py
 !/.github/scripts/test_publish_release.py
+!/.github/scripts/test_release_path.py
 !/.github/workflows/actionlint.yml
 !/.github/workflows/audit.yml
 !/.github/workflows/claim.yml
