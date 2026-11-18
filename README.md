@@ -44,20 +44,24 @@ Use `-co --exclude-standard`, not a bare `git ls-files`: a brand-new
 module is untracked until you stage it, and pylint would otherwise report
 a clean run over every file except the one you just wrote.
 
-Coverage:
+Coverage, as the `tests` coverage job runs it:
 
 ```sh
 for s in tests/test_*.py; do
-  python3 -m coverage run --parallel-mode --source=git_coauthorship "$s"
+  python3 -m coverage run --rcfile=.coveragerc --parallel-mode --source=git_coauthorship "$s"
 done
 python3 -m coverage combine && python3 -m coverage report
 ```
 
 Each suite in its own subprocess, because that is what `run_tests.py`
 does — measuring a different execution shape than CI runs would report
-coverage for a program nobody executes. Gated at **33%**, a ratchet
-under the current coverage, not a target. Raise it as coverage climbs;
-never lower it to turn a build green.
+coverage for a program nobody executes. `.coveragerc` sets
+`patch = subprocess`, so the tool processes the suites start count too,
+and `requirements-test.txt` brings git-filter-repo, so the end-to-end
+rewrite tests run instead of skipping. The floor is committed data in
+`.github/ci-thresholds.json`, a ratchet under the measured total, not a
+target: every green push to `main` raises it to the measured total minus
+1.5 through `ratchet push`, and nothing lowers it.
 
 ### CI
 

@@ -149,6 +149,7 @@ class ThisRepository(Fixture):
         done = self.run_gate("--print-paths", cwd=ROOT)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout.splitlines(), [
+            ".coveragerc", ".github/ci-thresholds.json",
             ".github/comment-share.json", ".github/scripts/commit_scopes.py",
             ".github/scripts/conflict_markers.sh",
             ".github/scripts/gate_base_freshness.py", ".github/scripts/gate_wait.py",

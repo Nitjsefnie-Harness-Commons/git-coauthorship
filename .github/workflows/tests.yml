@@ -111,17 +111,22 @@ jobs:
           cache-dependency-path: requirements-test.txt
 
       - name: Install the coverage toolchain
-        run: python -m pip install --require-hashes -r requirements-test.txt
+        # git-filter-repo is what the end-to-end rewrite tests skip without,
+        # so a missing one fails here rather than as a quietly lower number.
+        run: |
+          python -m pip install --require-hashes -r requirements-test.txt
+          git filter-repo --version
 
       - name: Measure
         id: measure
         env:
           PYTHONDONTWRITEBYTECODE: "1"
-        # Each suite in its OWN subprocess with --parallel-mode, then
-        # combined, as run_tests.py runs them: another execution shape would
-        # report coverage for a program nobody runs. A failing suite does not
-        # fail this job: the suites job above owns that verdict, and the
-        # gate below is about how much code was reached.
+        # Each suite in its OWN subprocess, then combined, as run_tests.py
+        # runs them: another execution shape would report coverage for a
+        # program nobody runs. .coveragerc measures the tools the suites
+        # start as child processes too. A failing suite does not fail this
+        # job: the suites job above owns that verdict, and the gate below is
+        # about how much code was reached.
         run: |
           shopt -s nullglob
           suites=(tests/test_*.py)
@@ -132,7 +137,7 @@ jobs:
           failed=0
           for suite in "${suites[@]}"; do
             echo "::group::$suite"
-            if ! python -m coverage run --parallel-mode --source=git_coauthorship "$suite"; then
+            if ! python -m coverage run --rcfile=.coveragerc --parallel-mode --source=git_coauthorship "$suite"; then
               echo "  (suite did not pass; its coverage still counts)"
               failed=$(( failed + 1 ))
             fi
@@ -176,8 +181,33 @@ jobs:
 
       - name: Coverage gate
         if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
-        # A RATCHET, not a target. 33 sits just under the 35.2%
-        # measured when this landed, so ordinary churn stays green and a real
-        # regression goes red. Raise the floor by hand as coverage climbs —
-        # never lower it to make a red build green.
-        run: python -m coverage report --fail-under=33 --precision=1
+        # A RATCHET, not a target. The floor is committed data in
+        # .github/ci-thresholds.json, and every green push to main raises it
+        # to the measured total minus 1.5 through ratchet-push.yml; nothing
+        # lowers it. An assignment's status is its substitution's, so an
+        # unreadable record fails this step instead of gating on "".
+        run: |
+          floor="$(python .github/scripts/ratchet_thresholds.py floor .github/ci-thresholds.json)"
+          python -m coverage report --fail-under="$floor" --precision=1
+
+      - name: Stage a raised floor
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        # Read-only here: ratchet-push.yml commits the staged record once
+        # this run is green. No artifact is the "no raise" answer.
+        run: |
+          out="$RUNNER_TEMP/ratchet-coverage"
+          measured="$(python -m coverage report --format=total --precision=1)"
+          python .github/scripts/ratchet_thresholds.py raise .github/ci-thresholds.json \
+            --measured "$measured" --out-dir "$out"
+          if [ -e "$out" ]; then
+            git rev-parse HEAD > "$out/base.txt"
+          fi
+
+      - name: Upload the raised floor
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ratchet-coverage
+          path: ${{ runner.temp }}/ratchet-coverage
+          if-no-files-found: ignore
+          retention-days: 1

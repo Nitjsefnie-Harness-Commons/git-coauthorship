@@ -23,6 +23,7 @@
 
 
 # ─── root ───
+!/.coveragerc
 !/.gitignore
 !/.pylintrc
 !/CONTRIBUTING.md
@@ -44,6 +45,7 @@
 !/.github/ISSUE_TEMPLATE/
 !/.github/ISSUE_TEMPLATE/issue.md
 !/.github/PULL_REQUEST_TEMPLATE.md
+!/.github/ci-thresholds.json
 !/.github/comment-share.json
 !/.github/dependabot.yml
 !/.github/size-baseline.json

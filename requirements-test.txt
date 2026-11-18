@@ -9,11 +9,16 @@
 # purpose. `coverage` is here for the gate in tests.yml, which also calls
 # `--format=markdown` and `--fail-under` directly so the gate is a step
 # of its own and the summary still renders when it is red.
+# `git-filter-repo` is here so the coverage job runs the end-to-end rewrite
+# tests that skip without it; it is a test tool, never a dependency of the
+# package, and the suites job, which installs nothing, still skips them.
 #
 # Coverage runs each suite as its own subprocess with --parallel-mode and
 # then combines, because run_tests.py also runs each suite as its own
 # subprocess. Running them in one process would not be measuring the thing
-# CI actually runs.
+# CI actually runs. The suites start the tools as child processes of their
+# own; .coveragerc's `patch = subprocess` (coverage 7.10 or later) measures
+# those too, each into a data file of its own until the combine.
 #
 # There is deliberately NO pytest here, and no speed.yml in this repo.
 # pytest cannot run the tests/ suites: the tests are plain functions taking
@@ -23,7 +28,7 @@
 # pytest emits, so there is no timing harness to build the gate on.
 #
 # Resolved for every platform on Python 3.13; regenerate with:
-#   grep -oE '^coverage==[^ ]+' requirements-test.txt | uv pip compile - --universal --generate-hashes --no-annotate --no-header --no-emit-package pip --python-version 3.13
+#   grep -oE '^(coverage|git-filter-repo)==[^ ]+' requirements-test.txt | uv pip compile - --universal --generate-hashes --no-annotate --no-header --no-emit-package pip --python-version 3.13
 coverage==7.17.3 \
     --hash=sha256:0241e03dd65a1edf2e841eb19d8d72dca21ada5c869dcef6c9fde1b166d519a9 \
     --hash=sha256:0837b71a40749d9c4016cf8c51ba8c6153f7dd40cf4dfa287a2f28376fa50917 \
@@ -144,3 +149,6 @@ coverage==7.17.3 \
     --hash=sha256:ff0ca078fe63faffff1cff24c804afd4010e35d9c75bb593877b3d4321826c91 \
     --hash=sha256:ff273110e4e1505ef7a642523ba43f58eb6770ae9e8f869d72efea816cb4bc2c \
     --hash=sha256:ff5069e99039739c2fade5dd12cf8df7dc1b1217a0b915110605e0bbdddf1187
+git-filter-repo==2.47.0 \
+    --hash=sha256:2cd04929b9024e83e65db571cbe36aec65ead0cb5f9ec5abe42158654af5ad83 \
+    --hash=sha256:411b27e68a080c07a69c233cb526dbc2d848b09a72f10477f4444dd0822cf290
