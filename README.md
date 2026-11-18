@@ -61,7 +61,9 @@ and `requirements-test.txt` brings git-filter-repo, so the end-to-end
 rewrite tests run instead of skipping. The floor is committed data in
 `.github/ci-thresholds.json`, a ratchet under the measured total, not a
 target: every green push to `main` raises it to the measured total minus
-1.5 through `ratchet push`, and nothing lowers it.
+1.5 through `ratchet push`, and nothing lowers it. Pull requests also get
+an informational report on the coverage of their changed lines
+(`diff-cover`) in the job summary; it gates nothing.
 
 ### CI
 

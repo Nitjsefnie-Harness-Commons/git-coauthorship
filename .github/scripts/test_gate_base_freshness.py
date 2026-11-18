@@ -173,7 +173,7 @@ class ThisRepository(Fixture):
             "git_coauthorship/_scope.py", "git_coauthorship/author_stats.py",
             "git_coauthorship/reauthor.py",
             "requirements-audit.txt", "requirements-build.txt", "requirements-dev.txt",
-            "requirements-test.txt", "requirements-zizmor.txt", "run_tests.py",
+            "requirements-diff-cover.txt", "requirements-test.txt", "requirements-zizmor.txt", "run_tests.py",
             "tests/_util.py",
             "tests/test_author_stats.py", "tests/test_package_contract.py",
             "tests/test_reauthor.py"])
