@@ -67,6 +67,8 @@ jobs:
           GIT_COAUTHORSHIP_DEPLOY_KEY: ${{ secrets.MASTER_PUSH_DEPLOY_KEY }}
           GIT_COAUTHORSHIP_REPO: ${{ github.repository }}
           GIT_COAUTHORSHIP_LEGS: ${{ steps.list.outputs.legs }}
+          GIT_COAUTHORSHIP_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          GIT_COAUTHORSHIP_HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
         run: |
           declare -A record=([coverage]=.github/ci-thresholds.json)
           declare -A raises=([coverage]='the coverage floor')
@@ -94,6 +96,15 @@ jobs:
             fi
             base="$leg_base"
           done
+          # The data must describe the run that triggered this job, from this repository.
+          if [ "$base" != "$GIT_COAUTHORSHIP_HEAD_SHA" ]; then
+            echo "the ratchet data measured $base, not the triggering run's ${GIT_COAUTHORSHIP_HEAD_SHA:-(none)}" >&2
+            exit 1
+          fi
+          if [ "$GIT_COAUTHORSHIP_HEAD_REPO" != "$GIT_COAUTHORSHIP_REPO" ]; then
+            echo "the triggering run is from $GIT_COAUTHORSHIP_HEAD_REPO, not $GIT_COAUTHORSHIP_REPO" >&2
+            exit 1
+          fi
 
           eval "$(ssh-agent -s)" >/dev/null
           trap 'kill "$SSH_AGENT_PID" 2>/dev/null || true' EXIT
@@ -107,14 +118,20 @@ jobs:
 
           scratch="$RUNNER_TEMP/ratchet-repo"
           work="$RUNNER_TEMP/ratchet-work"
-          mkdir "$work"
+          mkdir "$work" "$scratch"
           # Only plain data files enter the working directory.
           cd "$work"
           git init --bare -q "$scratch"
           git -C "$scratch" remote add origin "git@github.com:$GIT_COAUTHORSHIP_REPO.git"
-          git -C "$scratch" fetch --quiet origin main
+          # The full ref: a bare `main` can resolve to a tag of that name.
+          git -C "$scratch" fetch --quiet origin refs/heads/main
           fetched="$(git -C "$scratch" rev-parse FETCH_HEAD)"
           git -C "$scratch" read-tree "$fetched"
+          # A run on a tag named main also reports head_branch main: only main's own history counts.
+          if ! git -C "$scratch" merge-base --is-ancestor "$base" "$fetched" 2>/dev/null; then
+            echo "the measured commit $base is not in main's history" >&2
+            exit 1
+          fi
           if [ "$fetched" != "$base" ]; then
             others=()
             for path in "${record[@]}"; do others+=(":(exclude)$path"); done
@@ -153,7 +170,7 @@ jobs:
           git -C "$scratch" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           commit="$(git -C "$scratch" commit-tree "$tree" -p "$fetched" -m "$message")"
           if ! git -C "$scratch" push --quiet origin "$commit:refs/heads/main"; then
-            git -C "$scratch" fetch --quiet origin main
+            git -C "$scratch" fetch --quiet origin refs/heads/main
             if [ "$fetched" = "$(git -C "$scratch" rev-parse FETCH_HEAD)" ]; then
               echo "the ratchet push was rejected while main stood still" >&2
               exit 1

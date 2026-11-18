@@ -57,11 +57,13 @@ class RatchetPush(unittest.TestCase):
                         GIT_CONFIG_KEY_0=f"url.{self.remote}.insteadOf",
                         GIT_CONFIG_VALUE_0="git@github.com:owner/repo.git",
                         GIT_COAUTHORSHIP_REPO="owner/repo", GIT_COAUTHORSHIP_RUN_ID="7",
-                        GIT_COAUTHORSHIP_LEGS="coverage", GIT_COAUTHORSHIP_DEPLOY_KEY="key material")
+                        GIT_COAUTHORSHIP_LEGS="coverage", GIT_COAUTHORSHIP_DEPLOY_KEY="key material",
+                        GIT_COAUTHORSHIP_HEAD_REPO="owner/repo")
         self.git("init", "-q", "--bare", "-b", "main", str(self.remote))
         self.work = self.root / "clone"
         self.git("clone", "-q", str(self.remote), str(self.work))
         self.base = self.commit({RECORD: document(80.0, 81.5), "tool.py": "x = 1\n"})
+        self.env["GIT_COAUTHORSHIP_HEAD_SHA"] = self.base
         self.stage(document(83.7, 85.2), self.base)
 
     def git(self, *args: str, cwd: Path | None = None) -> str:
@@ -87,9 +89,9 @@ class RatchetPush(unittest.TestCase):
         if extra:
             (leg / extra).write_text("", encoding="utf-8")
 
-    def run_step(self, name: str, **environ: str) -> subprocess.CompletedProcess[str]:
-        for fresh in ("ratchet-work", "ratchet-repo"):
-            shutil.rmtree(self.root / "temp" / fresh, ignore_errors=True)
+    def run_step(self, name: str, fresh: bool = True, **environ: str) -> subprocess.CompletedProcess[str]:
+        for made in ("ratchet-work", "ratchet-repo") if fresh else ():
+            shutil.rmtree(self.root / "temp" / made, ignore_errors=True)
         script = self.root / "step.sh"
         script.write_text(publish.step_run(WORKFLOW, name), encoding="utf-8")
         return subprocess.run(["bash", "-e", str(script)], cwd=self.root,
@@ -97,12 +99,17 @@ class RatchetPush(unittest.TestCase):
                               capture_output=True, text=True, check=False)
 
     def main_tip(self) -> str:
-        return self.git("--git-dir", str(self.remote), "rev-parse", "main")
+        return self.git("--git-dir", str(self.remote), "rev-parse", "refs/heads/main")
 
     def assert_dropped(self, done: subprocess.CompletedProcess[str], tip: str, reason: str) -> None:
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn(f"::notice::Dropped: {reason}", done.stdout)
         self.assertEqual(self.main_tip(), tip)
+
+    def assert_refused(self, done: subprocess.CompletedProcess[str], reason: str) -> None:
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn(reason, done.stderr)
+        self.assertEqual(self.main_tip(), self.base)
 
     def test_the_listing_selects_each_present_leg(self) -> None:
         for names, output in (("wheel\nratchet-coverage\ncoverage-xml", "coverage=true\nlegs=coverage\n"),
@@ -168,6 +175,29 @@ class RatchetPush(unittest.TestCase):
     def test_staged_data_that_is_not_json_is_dropped(self) -> None:
         self.stage("{", self.base)
         self.assert_dropped(self.run_step(PUSH), self.base, f"the merged {RECORD} is not JSON")
+
+    def test_a_run_of_another_commit_or_repository_is_refused_before_the_key(self) -> None:
+        for environ, reason in (({"GIT_COAUTHORSHIP_HEAD_SHA": "ab" * 20}, "not the triggering run's"),
+                                ({"GIT_COAUTHORSHIP_HEAD_SHA": ""}, "not the triggering run's"),
+                                ({"GIT_COAUTHORSHIP_HEAD_REPO": "fork/repo"}, "is from fork/repo")):
+            with self.subTest(environ=environ):
+                self.assert_refused(self.run_step(PUSH, **environ), reason)
+                self.assertFalse((self.root / "calls.log").exists())
+
+    def test_a_tag_run_on_a_commit_off_mains_history_is_refused(self) -> None:
+        self.git("checkout", "-q", "-b", "side", cwd=self.work)
+        (self.work / "tool.py").write_text("x = 3\n", encoding="utf-8")
+        self.git("commit", "-q", "-am", "side", cwd=self.work)
+        side = self.git("rev-parse", "HEAD", cwd=self.work)
+        self.git("push", "-q", "origin", "HEAD:refs/tags/main", cwd=self.work)
+        self.stage(document(0, 1.5), side)
+        self.assert_refused(self.run_step(PUSH, GIT_COAUTHORSHIP_HEAD_SHA=side), f"{side} is not in main's history")
+
+    def test_an_existing_scratch_repository_is_refused(self) -> None:
+        (self.root / "temp" / "ratchet-repo").mkdir()
+        done = self.run_step(PUSH, fresh=False)
+        self.assertNotEqual(done.returncode, 0, done.stdout)
+        self.assertEqual(self.main_tip(), self.base)
 
     def test_a_rejected_push_fails_unless_main_moved(self) -> None:
         hook = self.remote / "hooks" / "pre-receive"
