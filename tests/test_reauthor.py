@@ -142,8 +142,9 @@ def test_push_overwrites_only_the_remote_tip_this_clone_last_saw(tmp):
     never fetched, is left as it was; a separate push URL is pushed unchecked."""
     recent, new, ok = ["--recent", "1", *NEW], ["checkout", "-q", "-b", "new"], "[push] Force-pushed."
     moved = "[push] ERROR: the remote branch moved since this clone last saw it; the rewritten local history was not pushed."
-    rows = [(recent, [], 0, ok, "remote.git", "main"),
-            (recent, [["push", "-q", "origin", "HEAD:main"], ["update-ref", "refs/remotes/origin/main", "HEAD~1"]],
+    behind = [["push", "-q", "origin", "HEAD:main"], ["update-ref", "refs/remotes/origin/main", "HEAD~1"]]
+    rows = [(recent, [], 0, ok, "remote.git", "main"), (recent, behind, 1, moved, "remote.git", "main"),
+            (recent, [["remote", "set-url", *u, "origin", "../remote.git"] for u in ([], ["--push"])] + behind,
              1, moved, "remote.git", "main"),
             (recent, [new], 0, ok, "remote.git", "new"),
             (recent, [new, ["push", "-q", "origin", "HEAD~1:refs/heads/new"], ["update-ref", "-d", "refs/remotes/origin/new"]],
