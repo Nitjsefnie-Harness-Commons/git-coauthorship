@@ -129,7 +129,7 @@ class Fixture(unittest.TestCase):
 
 class ThisRepository(Fixture):
     def test_required_jobs_are_the_jobs_every_pull_request_runs(self) -> None:
-        self.assertEqual(gate.REQUIRED_JOBS, ("actionlint", "suites", "wheel", "coverage",
+        self.assertEqual(gate.REQUIRED_JOBS, ("actionlint", "suites", "wheel", "coverage", "perf",
                                               "pycodestyle", "pylint", "pyright",
                                               "pip-audit", "analyze", "comment-share",
                                               "size-baseline"))
@@ -150,7 +150,7 @@ class ThisRepository(Fixture):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout.splitlines(), [
             ".coveragerc", ".github/ci-thresholds.json",
-            ".github/comment-share.json", ".github/scripts/commit_scopes.py",
+            ".github/comment-share.json", ".github/perf-budgets.json", ".github/scripts/commit_scopes.py",
             ".github/scripts/conflict_markers.sh",
             ".github/scripts/gate_base_freshness.py", ".github/scripts/gate_wait.py",
             ".github/scripts/perf_budget.py", ".github/scripts/perf_budget_raise.py",

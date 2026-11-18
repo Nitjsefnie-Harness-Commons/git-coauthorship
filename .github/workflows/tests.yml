@@ -231,3 +231,74 @@ jobs:
           path: ${{ runner.temp }}/ratchet-coverage
           if-no-files-found: ignore
           retention-days: 1
+
+  perf:
+    # Instructions retired under callgrind, never wall time; perf_budget.py
+    # says what is counted. The image is pinned because its libc and valgrind
+    # are part of every count.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The raise check reads every commit since the base.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13.14"
+
+      - name: Install valgrind
+        timeout-minutes: 5
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends valgrind
+          valgrind --version
+
+      - name: Refuse an undeclared budget raise
+        env:
+          GIT_COAUTHORSHIP_EVENT: ${{ github.event_name }}
+          GIT_COAUTHORSHIP_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GIT_COAUTHORSHIP_BEFORE_SHA: ${{ github.event.before }}
+          GIT_COAUTHORSHIP_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python .github/scripts/perf_budget_raise.py --event "$GIT_COAUTHORSHIP_EVENT" \
+            --base "$GIT_COAUTHORSHIP_BASE_SHA" --before "$GIT_COAUTHORSHIP_BEFORE_SHA" --head "$GIT_COAUTHORSHIP_HEAD_SHA"
+
+      - name: Measure
+        id: measure
+        run: python .github/scripts/perf_budget.py measure --work "$RUNNER_TEMP/perf" --out "$RUNNER_TEMP/perf-measurement.json"
+
+      - name: Upload the measurement
+        if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: perf-measurement
+          path: ${{ runner.temp }}/perf-measurement.json
+          if-no-files-found: error
+
+      - name: Check the counts against the budget
+        run: |
+          python .github/scripts/perf_budget.py check --budget .github/perf-budgets.json \
+            --measurement "$RUNNER_TEMP/perf-measurement.json" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Stage a lowered budget
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        run: |
+          out="$RUNNER_TEMP/ratchet-perf"
+          python .github/scripts/perf_budget.py tighten --budget .github/perf-budgets.json \
+            --measurement "$RUNNER_TEMP/perf-measurement.json" --out-dir "$out"
+          if [ -e "$out" ]; then
+            git rev-parse HEAD > "$out/base.txt"
+          fi
+
+      - name: Upload the lowered budget
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ratchet-perf
+          path: ${{ runner.temp }}/ratchet-perf
+          if-no-files-found: ignore
+          retention-days: 1

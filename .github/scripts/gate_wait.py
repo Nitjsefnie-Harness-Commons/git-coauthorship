@@ -12,7 +12,7 @@ from typing import Any, Callable
 # the set from the workflows and fails when the two differ.
 REQUIRED_GATES = (
     "actionlint", "pip-audit", "analyze (actions)", "analyze (python)",
-    "pycodestyle", "pylint", "pyright", "wheel", "coverage",
+    "pycodestyle", "pylint", "pyright", "wheel", "coverage", "perf",
     *(f"suites ({os}, {python})" for os in ("ubuntu-latest", "windows-latest", "macos-latest")
       for python in ("3.11", "3.12", "3.13", "3.14")),
 )
