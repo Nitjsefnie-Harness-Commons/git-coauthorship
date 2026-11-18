@@ -34,7 +34,7 @@ def scalar(value: str) -> str:
     value = re.sub(r"\s+#.*$", "", value).strip()
     if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
         return value[1:-1]
-    if value[:1] in "'\"[{&*|>!%@`":
+    if value and value[0] in "'\"[{&*|>!%@`":
         raise WorkflowError(f"unread scalar {value!r}")
     return value
 
@@ -80,7 +80,10 @@ def block_list(lines: list[str], start: int, end: int, indent: int) -> list[str]
 
 def strings(lines: list[str], entry: tuple[str | None, int, int], indent: int) -> list[str]:
     value, start, end = entry
-    return flow_list(value) if value is not None else block_list(lines, start, end, indent)
+    items = flow_list(value) if value is not None else block_list(lines, start, end, indent)
+    if value is None and not items:
+        raise WorkflowError("a key with neither a value nor list items")
+    return items
 
 
 def push_trigger(text: str) -> dict[str, list[str]] | None:
@@ -111,6 +114,8 @@ def matrix_rows(lines: list[str], entry: tuple[str | None, int, int]) -> list[di
     if value is not None:
         raise WorkflowError(f"`matrix: {value}` is not a block mapping")
     axes = children(lines, start, end, 8)
+    if "exclude" in axes:
+        raise WorkflowError("a matrix `exclude:`")
     if "include" in axes:
         if len(axes) != 1:
             raise WorkflowError("an `include:` beside other matrix keys")
@@ -146,6 +151,8 @@ def check_names(text: str) -> dict[str, list[str]]:
         if value is not None:
             raise WorkflowError(f"job `{job}` is not a block mapping")
         keys = children(lines, start, end, 4)
+        if "uses" in keys:
+            raise WorkflowError(f"job `{job}` calls a reusable workflow, whose checks are `{job} / <inner>`")
         rows: list[dict[str, str]] = [{}]
         if "strategy" in keys:
             strategy = children(lines, keys["strategy"][1], keys["strategy"][2], 6)
@@ -249,7 +256,10 @@ class Reader(unittest.TestCase):
                      "on:\n  push:\n    branches: ${{ fromJSON('[]') }}\n",
                      "jobs:\n  j:\n    strategy:\n      matrix: ${{ fromJSON(x) }}\n",
                      "jobs:\n  j:\n    name: j ${{ github.ref }}\n",
-                     "jobs:\n  j:\n    strategy:\n      matrix:\n        os: [a]\n        include:\n          - os: b\n"):
+                     "jobs:\n  j:\n    strategy:\n      matrix:\n        os: [a]\n        include:\n          - os: b\n",
+                     "jobs:\n  s:\n    strategy:\n      matrix:\n        os: [a, b]\n        exclude:\n          - os: a\n",
+                     "jobs:\n  r:\n    uses: ./.github/workflows/other.yml\n",
+                     "on:\n  push:\n    branches:\n  pull_request:\n"):
             with self.subTest(text=text), self.assertRaises(WorkflowError):
                 (push_trigger if text.startswith("on:") else check_names)(text)
 
