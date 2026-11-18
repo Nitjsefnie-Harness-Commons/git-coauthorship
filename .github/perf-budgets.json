@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "counter": "callgrind-ir",
+  "tolerance_pct": 1.0,
+  "toolchain": {
+    "python": "3.13.14 (main, Jul 22 2026, 12:09:17) [GCC 14.2.0]",
+    "valgrind": "valgrind-3.24.0",
+    "libc": "glibc 2.41"
+  },
+  "workloads": {
+    "author-stats": 524370436,
+    "reauthor-mapping": 390089993
+  }
+}
