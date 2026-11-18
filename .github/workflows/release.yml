@@ -40,7 +40,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+        # A ref publish would refuse ends here, not 45 minutes later.
         run: |
+          case "${GITHUB_REF:-}" in
+            refs/tags/*) ;;
+            *) echo "Not a tag ref (${GITHUB_REF:-}); nothing to publish." >&2; exit 1 ;;
+          esac
           python3 .github/scripts/gate_wait.py --repo "$REPO" --sha "$(git rev-parse HEAD)" \
             --exclude release-gates --exclude release-build --exclude release-publish
 
@@ -121,7 +126,7 @@ jobs:
             refs/tags/*) tag="${GITHUB_REF#refs/tags/}" ;;
             *)
               echo "Not a tag ref (${GITHUB_REF:-}); nothing to publish." >&2
-              echo "Push a v* tag — .github/workflows/tag.yml does that" >&2
+              echo "Push a v* tag — the tag workflow (tag.yml) does that" >&2
               echo "automatically when __version__ changes." >&2
               exit 1
               ;;
