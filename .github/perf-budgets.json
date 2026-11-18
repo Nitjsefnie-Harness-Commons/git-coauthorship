@@ -5,7 +5,8 @@
   "toolchain": {
     "python": "3.13.14 (main, Jul 22 2026, 12:09:17) [GCC 14.2.0]",
     "valgrind": "valgrind-3.24.0",
-    "libc": "glibc 2.41"
+    "libc": "glibc 2.41",
+    "image": "unpinned"
   },
   "workloads": {
     "author-stats": 524370436,

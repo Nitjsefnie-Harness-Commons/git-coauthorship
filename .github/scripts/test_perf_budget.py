@@ -20,7 +20,8 @@ assert spec is not None and spec.loader is not None
 pb = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pb)
 
-CHAIN = {"python": "3.13.14 (main) [GCC]", "valgrind": "valgrind-3.24.0", "libc": "glibc 2.39"}
+CHAIN = {"python": "3.13.14 (main) [GCC]", "valgrind": "valgrind-3.24.0", "libc": "glibc 2.39",
+         "image": "python:3.13@sha256:00"}
 # The harness pins its children's environment, so the stub takes its orders from files beside it.
 STUB = """
 import os, shutil, subprocess, sys
@@ -245,6 +246,10 @@ class Measure(unittest.TestCase):
         self.assertTrue(result["toolchain"]["libc"].endswith(", package libc6 libc6-rev libc6-i386"), result["toolchain"])
         self.assertEqual(set(result["wall_seconds"]), set(pb.WORKLOADS))
         self.assertEqual(pb.validate_measurement(copy.deepcopy(result)), result)
+        self.assertEqual(result["toolchain"]["image"], "unpinned")
+        self.assertEqual(self.measure(GIT_COAUTHORSHIP_PERF_IMAGE="python:3@sha256:ab").returncode, 0)
+        self.assertEqual(json.loads((self.root / "m.json").read_text(encoding="utf-8"))["toolchain"]["image"],
+                         "python:3@sha256:ab")
 
     def test_a_broken_harness_exits_3(self) -> None:
         capture, stop, mute = (self.root / "bin" / name for name in ("capture.out", "exit", "mute"))
