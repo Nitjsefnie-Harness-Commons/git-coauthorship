@@ -23,16 +23,18 @@ spec.loader.exec_module(pb)
 CHAIN = {"python": "3.13.14 (main) [GCC]", "valgrind": "valgrind-3.24.0", "libc": "glibc 2.39"}
 # The harness pins its children's environment, so the stub takes its orders from files beside it.
 STUB = """
-import os, shutil, sys
+import os, shutil, subprocess, sys
 if sys.argv[1:] == ["--version"]:
     sys.exit(print("valgrind-stub"))
 here = os.path.dirname(os.path.abspath(sys.argv[0]))
 target = next(arg.split("=", 1)[1] for arg in sys.argv if arg.startswith("--callgrind-out-file="))
-if os.path.exists(os.path.join(here, "exit")):
-    sys.exit(int(open(os.path.join(here, "exit")).read()))
 if os.path.exists(os.path.join(here, "capture.out")):
     shutil.copyfile(os.path.join(here, "capture.out"), target)
 command = [arg for arg in sys.argv[1:] if not arg.startswith("--")]
+if os.path.exists(os.path.join(here, "exit")):
+    sys.exit(subprocess.run(command).returncode and int(open(os.path.join(here, "exit")).read()))
+if os.path.exists(os.path.join(here, "mute")):
+    sys.exit(subprocess.run(command, stdout=subprocess.DEVNULL).returncode)
 os.execv(command[0], command)
 """
 
@@ -237,13 +239,18 @@ class Measure(unittest.TestCase):
         self.assertEqual(pb.validate_measurement(copy.deepcopy(result)), result)
 
     def test_a_broken_harness_exits_3(self) -> None:
-        capture, stop = self.root / "bin" / "capture.out", self.root / "bin" / "exit"
-        for arrange, env, reason in ((lambda: capture.write_text("", encoding="utf-8"), {}, "no single nonzero Ir summary"),
-                                     (capture.unlink, {}, "cannot read"),
-                                     (lambda: stop.write_text("7", encoding="utf-8"), {}, "author-stats exited 7"),
-                                     (stop.unlink, {"PATH": f"{self.root / 'bin'}{os.pathsep}/nonexistent"}, "git is not on PATH")):
+        capture, stop, mute = (self.root / "bin" / name for name in ("capture.out", "exit", "mute"))
+        for orders, env, reason in (({capture: ""}, {}, "no single nonzero Ir summary"),
+                                    ({capture: None}, {}, "cannot read"),
+                                    ({stop: "7"}, {}, f"author-stats exited 7 (expected 1) printing '{pb.WORKLOADS['author-stats'][2]}"),
+                                    ({mute: ""}, {}, "author-stats exited 1 (expected 1) printing ''"),
+                                    ({}, {"PATH": f"{self.root / 'bin'}{os.pathsep}/nonexistent"}, "git is not on PATH")):
             with self.subTest(reason=reason):
-                arrange()
+                for path in (stop, mute):
+                    path.unlink(missing_ok=True)
+                shutil.copyfile(CAPTURE, capture)
+                for path, text in orders.items():
+                    _ = path.write_text(text, encoding="utf-8") if text is not None else path.unlink()
                 done = self.measure(**env)
                 self.assertEqual(done.returncode, 3, done.stdout)
                 self.assertIn(reason, done.stderr)
