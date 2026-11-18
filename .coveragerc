@@ -1,0 +1,7 @@
+# Read by `coverage run --rcfile=.coveragerc` in tests.yml's coverage job and
+# the README's coverage command. The suites start reauthor.py and the package
+# modules as child processes; `patch = subprocess` starts the measurer in each
+# of them, with the command line's --parallel-mode and --source.
+
+[run]
+patch = subprocess
