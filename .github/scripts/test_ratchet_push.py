@@ -172,9 +172,17 @@ class RatchetPush(unittest.TestCase):
         self.assertIn("missing its secret", done.stderr)
         self.assertFalse((self.root / "calls.log").exists())
 
-    def test_staged_data_that_is_not_json_is_dropped(self) -> None:
-        self.stage("{", self.base)
-        self.assert_dropped(self.run_step(PUSH), self.base, f"the merged {RECORD} is not JSON")
+    def test_a_record_off_the_schema_or_below_mains_floor_is_refused(self) -> None:
+        python = {"floor": 83.7, "measured": 85.2}
+        for text in ("{", "[]", document(79.9, 85.2), document(83.7, 100.5), document(83.7, float("nan")),
+                     json.dumps({"schema_version": 2, "coverage": {"python": python}}),
+                     json.dumps({"schema_version": True, "coverage": {"python": python}}),
+                     json.dumps({"schema_version": 1, "coverage": {"python": python}, "x": 1}),
+                     json.dumps({"schema_version": 1, "coverage": {"python": {**python, "cell": "x"}}}),
+                     json.dumps({"schema_version": 1, "coverage": {"python": {**python, "floor": "84"}}})):
+            with self.subTest(text=text):
+                self.stage(text, self.base)
+                self.assert_refused(self.run_step(PUSH), f"{RECORD}: refusing")
 
     def test_a_run_of_another_commit_or_repository_is_refused_before_the_key(self) -> None:
         for environ, reason in (({"GIT_COAUTHORSHIP_HEAD_SHA": "ab" * 20}, "not the triggering run's"),
