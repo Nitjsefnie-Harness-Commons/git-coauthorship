@@ -23,8 +23,9 @@
 # There is deliberately NO pytest here: it cannot run the tests/ suites,
 # whose tests are plain functions taking helper arguments that pytest reads
 # as fixture requests. Nothing here serves the performance gate either:
-# tests.yml's perf job counts instructions with the runner's apt valgrind
-# and the stdlib-only .github/scripts/perf_budget.py, installing no Python package.
+# tests.yml's perf job counts instructions with the valgrind its own image
+# (.github/perf/Dockerfile) installs and the stdlib-only
+# .github/scripts/perf_budget.py, installing no Python package.
 #
 # Resolved for every platform on Python 3.13; regenerate with:
 #   grep -oE '^(coverage|git-filter-repo)==[^ ]+' requirements-test.txt | uv pip compile - --universal --generate-hashes --no-annotate --no-header --no-emit-package pip --python-version 3.13
