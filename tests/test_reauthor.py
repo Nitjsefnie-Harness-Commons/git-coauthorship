@@ -136,6 +136,35 @@ def test_identity_rewrite_restores_current_branch_upstream(tmp):
     assert _out(push_remote, "rev-parse", "refs/heads/main") == _out(d, "rev-parse", "HEAD")
 
 
+def test_push_overwrites_only_the_remote_tip_this_clone_last_saw(tmp):
+    """The lease is what refs/remotes/origin/<branch> held before the rewrite
+    (an --all-refs pass strips it): a remote moved since, or a branch the clone
+    never fetched, is left as it was; a separate push URL is pushed unchecked."""
+    recent, new, ok = ["--recent", "1", *NEW], ["checkout", "-q", "-b", "new"], "[push] Force-pushed."
+    moved = "[push] ERROR: the remote branch moved since this clone last saw it; the rewritten local history was not pushed."
+    rows = [(recent, [], 0, ok, "remote.git", "main"),
+            (recent, [["push", "-q", "origin", "HEAD:main"], ["update-ref", "refs/remotes/origin/main", "HEAD~1"]],
+             1, moved, "remote.git", "main"),
+            (recent, [new], 0, ok, "remote.git", "new"),
+            (recent, [new, ["push", "-q", "origin", "HEAD~1:refs/heads/new"], ["update-ref", "-d", "refs/remotes/origin/new"]],
+             1, moved, "remote.git", "new"),
+            (recent, [["init", "--bare", "-q", "../push.git"], ["remote", "set-url", "--push", "origin", "../push.git"]], 0,
+             "[push] Force-pushed to the separate push URL; the push was not checked against the remote.", "push.git", "main"),
+            (recent, [["remote", "set-url", "origin", "../missing.git"]], 1,
+             "[push] ERROR: git push failed; the rewritten local history was not pushed.", "remote.git", "main")]
+    rows += [(["--all", *NEW, "--all-refs"], [], 0, ok, "remote.git", "main")] * bool(shutil.which("git-filter-repo"))
+    for i, (args, prep, code, line, remote, branch) in enumerate(rows):
+        d, _remote = _tracked(os.path.join(tmp, str(i)))
+        _util.commit(d, "two", OLD)
+        for step in prep:
+            _out(d, *step)
+        where = os.path.join(d, os.pardir, remote)
+        before = _tip(where, f"refs/heads/{branch}")
+        out = _reauthor(d, *args, "--push", code=code).stdout
+        assert line in out.splitlines() and f"By: {NEW[0]}" in _out(d, "log", "-1", "--format=%B"), (prep, out)
+        assert _tip(where, f"refs/heads/{branch}") == (_tip(d, "HEAD") if code == 0 else before), (prep, out)
+
+
 def test_restore_does_not_copy_global_remote_values_into_local_config(tmp):
     _require_filter_repo()
     d, remote = _tracked(tmp)
@@ -315,17 +344,22 @@ def test_each_mode_rewrites_only_the_scope_it_prints(tmp):
 def test_runs_that_rewrite_nothing(tmp):
     """Refusals, and passes that stop after their preflight (so strip no
     signature); outside a repository rename_scope reports nothing."""
-    d = _fixture(tmp)
+    d, remote = _fixture(tmp), os.path.join(tmp, "remote.git")
     head, rename, none = _tip(d, "HEAD"), _MODES["--rename"][0], "[rename] Nothing to rename — not running filter-repo."
+    for args in (["init", "--bare", "-q", remote], ["remote", "add", "origin", remote],
+                 ["push", "-q", "origin", "main:feature"], ["update-ref", "-d", "refs/remotes/origin/feature"]):
+        _util.git(d, *args)  # the remote holds a `feature` this clone never fetched
     for args, code, line in (
             (["--all-refs", "--recent", "1", *NEW], 1, "ERROR: --all-refs widens --older, --all, --rename, "
              "--reauthor and --recommitter; none of them was given."),
             (["--dry-run", *_MODES["--reauthor"][0]], 1, "ERROR: --dry-run currently scopes --rename only."),
             (["--dry-run", *rename], 0, "[rename] --dry-run: stopping before any rewrite."),
+            (["--dry-run", "--push", *rename], 0, "[push] --dry-run: push skipped."),
             (["--rename", "Nobody", "n@example.com", *NEW], 0, none),
             (["--stop-at", "HEAD~1", *rename], 0, none)):
         status, out, runs = _main_in(d, *args)
-        assert (status, runs, _tip(d, "HEAD")) == (code, [], head) and line in out.splitlines(), (args, out)
+        assert (status, runs, _tip(d, "HEAD"), _tip(remote, "feature")) == (code, [], head, _tip(d, "main")) \
+            and line in out.splitlines(), (args, out)
     with contextlib.chdir(tmp):
         assert _RA.rename_scope("A", "a@x", False) == (None, [])
 

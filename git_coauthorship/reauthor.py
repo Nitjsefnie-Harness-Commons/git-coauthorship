@@ -131,9 +131,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 if __package__:
+    from ._push import push, read_lease
     from ._scope import announce_scope, refs_args, scope_lines, scope_refs
 else:  # run as a script or loaded by path: no package to import it from
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from _push import push, read_lease
     from _scope import announce_scope, refs_args, scope_lines, scope_refs
 
 __version__ = "1.1.0"
@@ -971,6 +973,7 @@ def main():
         print("ERROR: --dry-run currently scopes --rename only.")
         sys.exit(1)
 
+    lease = read_lease() if args.push else None
     dirty = stash_if_needed()
 
     try:
@@ -1031,12 +1034,7 @@ def main():
             recommitter(on, oe, nn, ne, stop_full=stop_full, all_refs=args.all_refs)
 
         if args.push:
-            # Plain --force, not --force-with-lease: a pass without --refs
-            # (--all-refs, no --stop-at) strips remote-tracking refs, so a
-            # lease bails with "stale info" there, and history was just
-            # rewritten on purpose; this one push serves every scope.
-            git("push", "origin", "HEAD", "--force")
-            print("[push] Force-pushed.")
+            push(lease, args.dry_run)
 
     finally:
         if dirty:
