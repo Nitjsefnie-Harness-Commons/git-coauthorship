@@ -13,19 +13,18 @@ name: tag
 # tag lands, the version looks shipped, no release is cut, and nothing goes
 # red.
 #
-# It waits for the other gates first. A tag outlives a mistake: a branch
-# can be force-pushed, but a release someone has pulled cannot be
-# unpublished. release.yml re-runs the suites, but would not catch a lint or
-# type regression.
+# It waits for the gates first: a tag outlives a mistake, as a branch can
+# be force-pushed but a tag someone has fetched cannot be recalled.
+# release-readiness reads the version and waits, read-only; only `tag` can
+# write, and it runs no repository code.
 #
 # It runs on every push the gates run on, so a bump whose own commit is red
 # is tagged by whichever later commit (usually touching other files) turns
 # main green. A push leaving an already-tagged version unchanged ends green
 # before the wait. Re-running a bump commit's failed gates creates no push,
-# so no run. A bump whose run went red on checks a newer push cancelled is
-# tagged at the newer tip by that push's run, once the tip's checks pass; to
-# tag the bump commit itself while its version is still untagged, re-run its
-# gates green, then dispatch with its `sha`.
+# so no run; to tag the bump commit itself while its version is still
+# untagged, re-run its gates green, then re-run its red tag run, whose
+# checks release.yml's wait judges (a later attempt replaces them).
 
 on:
   push:
@@ -56,24 +55,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  tag:
+  release-readiness:
     runs-on: ubuntu-latest
+    # The wait's 45 minutes, plus the steps before it.
     timeout-minutes: 60
 
     permissions:
-      # Pushing the tag; release.yml holds its own for the release.
-      contents: write
+      contents: read
       # Reading the other workflows' results for this SHA.
       checks: read
-      # Dispatching release.yml (the header says why).
-      actions: write
+      actions: read
+
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      sha: ${{ steps.version.outputs.sha }}
+      shipped: ${{ steps.existing.outputs.shipped }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.sha || github.sha }}
-          # This job DOES push (the tag), so it keeps the token.
-          persist-credentials: true
+          persist-credentials: false
 
       - name: Read and validate the version
         id: version
@@ -86,6 +88,8 @@ jobs:
             exit 1
           fi
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          # In full: a dispatch's `sha` may be a name.
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "Version is $version"
 
       - name: Refuse to re-tag an existing version
@@ -155,117 +159,52 @@ jobs:
           echo "tag and its release if it was cut in error." >&2
           exit 1
 
-      - name: Wait for the other gates on this commit
-        # This and the two steps after it skip on an already-shipped version.
+      - name: Wait for the gates on this commit
+        # Skips on an already-shipped version, and the tag job with it.
         if: steps.existing.outputs.shipped != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-        # Gates, read from the files so a fast workflow cannot stand in for
-        # a suite not yet registered: each workflow here whose on.push has
-        # no paths or tags, names main if it lists branches, and ignores
-        # only paths tag.yml ignores. A form this cannot read ends red. Each
-        # gate needs a successful push run on main for this commit; every
-        # other check run (bar ITSELF) must pass too. `cancelled` fails: a
-        # newer push superseded this SHA, which is not a commit to release.
+          SHA: ${{ steps.version.outputs.sha }}
         run: |
-          # The checked-out commit in full: a dispatch's `sha` may be a name.
-          SHA="$(git rev-parse HEAD)"
-          shopt -s nullglob
-          ignore="$(yq -o=json -I=0 '.on.push."paths-ignore" // []' \
-            .github/workflows/tag.yml)"
-          gates=()
-          for wf in .github/workflows/*.yml .github/workflows/*.yaml; do
-            [ "$wf" = .github/workflows/tag.yml ] && continue
-            on="$(yq -o=json -I=0 '.on' "$wf")" ||
-              { echo "Cannot parse $wf" >&2; exit 1; }
-            kind="$(jq -r --argjson ignore "$ignore" '
-              def list: if type == "array" then . else [.] end;
-              (if type == "string" or type == "array" then
-                 (if any(list[]; . == "push") then {} else null end)
-               elif type == "object" then
-                 (if has("push") then (.push // {}) else null end)
-               else error("no readable on:") end)
-              | if . == null then "other"
-                elif type != "object" then error("unreadable on.push")
-                elif has("paths") or has("tags") then "other"
-                elif has("branches") and
-                     any(.branches | list[]; test("[*?\\[!+]"))
-                  then error("branch pattern")
-                elif has("branches") and
-                     (any(.branches | list[]; . == "main") | not)
-                  then "other"
-                elif has("paths-ignore") and
-                     ((."paths-ignore" | list) - $ignore | length) > 0
-                  then "other"
-                else "gate" end' <<< "$on")" ||
-              { echo "Cannot tell whether $wf is a gate" >&2; exit 1; }
-            if [ "$kind" = gate ]; then gates+=("$wf"); fi
-          done
-          if [ "${#gates[@]}" -eq 0 ]; then
-            echo "No gate workflows found; refusing to tag unchecked." >&2
+          python3 .github/scripts/gate_wait.py --repo "$REPO" --sha "$SHA" \
+            --exclude release-readiness --exclude tag
+
+  tag:
+    needs: release-readiness
+    if: needs.release-readiness.outputs.shipped != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      # Creating the tag; release.yml holds its own for the release.
+      contents: write
+      # Dispatching release.yml (the header says why).
+      actions: write
+
+    steps:
+      - name: Create the tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.release-readiness.outputs.tag }}
+          SHA: ${{ needs.release-readiness.outputs.sha }}
+        # Annotated, not lightweight: it records who created it and when.
+        # Both values come from a job that ran repository code, so they are
+        # checked again here; -z anchors $ to the whole value.
+        run: |
+          if ! printf '%s' "$TAG" | grep -qzE '^v[0-9]+\.[0-9]+\.[0-9]+([._a-z0-9-]*)$' ||
+             ! printf '%s' "$SHA" | grep -qzE '^[0-9a-f]{40}$'; then
+            echo "Refusing to tag: '$TAG' at '$SHA' is not a version tag at a commit." >&2
             exit 1
           fi
-          echo "Gate workflows: ${gates[*]}"
-
-          tab=$'\t' nl=$'\n'
-          deadline=$(( SECONDS + 45 * 60 ))
-          while [ "$SECONDS" -lt "$deadline" ]; do
-            query="head_sha=$SHA&event=push&branch=main&per_page=100"
-            runs="$(gh api --paginate -H "Cache-Control: no-cache" \
-              "repos/$REPO/actions/runs?$query" \
-              --jq '.workflow_runs[]
-                    | "\(.id)\t\(.path)\t\(.status)\t\(.conclusion)"')"
-            checks="$(gh api --paginate \
-              -H "Cache-Control: no-cache" \
-              "repos/$REPO/commits/$SHA/check-runs" \
-              --jq '.check_runs[] | select(.name | startswith("tag") | not)
-                    | "\(.status)\t\(.conclusion)\t\(.name)"')"
-
-            gate_runs=""
-            for wf in "${gates[@]}"; do
-              run="$(echo "$runs" | awk -F'\t' -v wf="$wf" '$2 == wf' \
-                | sort -n | tail -n 1 | cut -f3,4)"
-              gate_runs+="${gate_runs:+$nl}${run:-no push run yet$tab}$tab$wf"
-            done
-            all="$gate_runs${checks:+$nl$checks}"
-
-            pending="$(echo "$all" | grep -cv '^completed' || true)"
-            if [ "$pending" -gt 0 ]; then
-              echo "$pending gate(s) or check(s) not finished:"
-              echo "$all" | grep -v '^completed' | awk '{print "    " $0}'
-              sleep 20
-              continue
-            fi
-
-            echo "All gates and checks completed:"
-            echo "$all" | awk '{print "    " $0}'
-            bad="$(echo "$gate_runs" | awk -F'\t' '$2 != "success"'
-              echo "$checks" | awk -F'\t' \
-                '$2 != "success" && $2 != "skipped" && $2 != "neutral"')"
-            if [ -n "$bad" ]; then
-              echo "Refusing to tag: these did not pass:" >&2
-              echo "$bad" | awk '{print "    " $0}' >&2
-              exit 1
-            fi
-            echo "Every gate and check passed — proceeding."
-            exit 0
-          done
-          echo "Timed out after 45 minutes on $SHA; not finished:" >&2
-          echo "$all" | grep -v '^completed' | awk '{print "    " $0}' >&2
-          exit 1
-
-      - name: Create and push the tag
-        if: steps.existing.outputs.shipped != 'true'
-        env:
-          TAG: ${{ steps.version.outputs.tag }}
-        # Annotated, not lightweight: it records who created it and when.
-        run: |
-          SHA="$(git rev-parse HEAD)"  # the commit the wait judged
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "$TAG" "$SHA"
-          git push origin "$TAG"
+          tag_object="$(gh api --method POST "repos/$REPO/git/tags" \
+            -f tag="$TAG" -f message="$TAG" -f object="$SHA" -f type=commit \
+            -f "tagger[name]=github-actions[bot]" \
+            -f "tagger[email]=41898282+github-actions[bot]@users.noreply.github.com" \
+            --jq .sha)"
+          gh api --method POST "repos/$REPO/git/refs" \
+            -f ref="refs/tags/$TAG" -f sha="$tag_object" --silent
           echo "Pushed $TAG at $SHA."
           {
             echo "### Tagged \`$TAG\`"
@@ -275,10 +214,9 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Start the release
-        if: steps.existing.outputs.shipped != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.version.outputs.tag }}
+          TAG: ${{ needs.release-readiness.outputs.tag }}
           REPO: ${{ github.repository }}
         # release.yml's `push: tags: v*` fires for a tag a HUMAN pushes, not
         # for this GITHUB_TOKEN push. A second run fails if the first
