@@ -91,16 +91,21 @@ workflow's `perf` job builds a fixed 20,000-commit history with
 declared workload under valgrind callgrind: `author-stats` over the whole
 history, and `reauthor --older`'s gap mapping, built as `main()` builds it
 and stopped before git-filter-repo rewrites anything. It counts the
-instructions the Python process retires (git runs uncounted) and fails
-when a count exceeds its budget in `.github/perf-budgets.json` by more than
-`tolerance_pct`, when a declared workload is missing from the measurement or
-an undeclared one appears, or when the runner's Python, valgrind or libc is
-not the one the budget records. Every green push to `main` lowers a budget
+instructions the Python process retires. git runs uncounted: it is the
+runner's binary, so its count would move with git releases rather than this
+code, while the Python side of every git call (spawning it, reading and
+parsing its output) is still counted. The gate fails when a count exceeds
+its budget in `.github/perf-budgets.json` by more than `tolerance_pct`, when
+a declared workload is missing from the measurement or an undeclared one
+appears, or when the runner's Python, valgrind or libc, package revision
+included, is not the one the budget records. Every green push to `main` lowers a budget
 its workload now undercuts by more than half the tolerance, through
 `ratchet push`; nothing raises one automatically. A raise is its own commit,
 touching only the budget file, carrying a
 `Budget-Raise: .github/perf-budgets.json <key> <from> -> <to>` line for each
-raised key: `perf_budget.py rebaseline` rewrites the budget from a run's
+raised key, and a count may end a pull request or push above where it
+started only as high as such a declared step took it:
+`perf_budget.py rebaseline` rewrites the budget from a run's
 `perf-measurement` artifact and prints those lines. Exit 3 means the
 harness broke, never that a budget was exceeded.
 
