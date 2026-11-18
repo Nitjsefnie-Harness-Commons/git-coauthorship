@@ -29,10 +29,10 @@ def test_tally_authors_counts_per_name_and_email(_tmp):
 
 
 def test_records_carry_six_fields_from_real_git(tmp):
-    """The author email must not shift date, subject, or trailer columns."""
+    """The author email must not shift date, subject, or body columns."""
     recs = _AS.git_log_records(_repo(tmp)[0], None)
-    h, name, email, date, subject, trailers = recs[-1]
-    assert (len(recs), len(h), name, email, date[:2], subject, trailers) == (
+    h, name, email, date, subject, body = recs[-1]
+    assert (len(recs), len(h), name, email, date[:2], subject, body) == (
         3, 40, *TESTER, "20", "first missing", ""), recs
 
 
@@ -97,8 +97,8 @@ def test_a_bot_is_a_bot_name_with_a_bot_noreply_address(_tmp):
             ("dependabot[bot]", "42+[bot]@users.noreply.github.com", False),
             ("dependabot[bot]", "+dependabot[bot]@users.noreply.github.com", False),
             ("dependabot[bot]", "ci+dependabot[bot]@users.noreply.github.com", False),
-            ("dependabot[bot]", "٤٢+dependabot[bot]@users.noreply.github.com", False),
-            ("dependabot[bot]", "42+dependabot[bot]@users.noreply.gıthub.com", False),
+            ("dependabot[bot]", "\u0664\u0662+dependabot[bot]@users.noreply.github.com", False),
+            ("dependabot[bot]", "42+dependabot[bot]@users.noreply.g\u0131thub.com", False),
             ("dependabot[bot]", "42+dependabot[bot]@users.noreply.github.com.example", False)):
         assert _AS.is_bot_author(name, email) is bot, (name, email)
 
