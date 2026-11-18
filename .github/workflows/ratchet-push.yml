@@ -3,10 +3,11 @@ name: ratchet push
 # Commits the records a green tests run on main staged as ratchet-<leg>
 # artifacts. The deploy key reaches only this job, which checks out no code:
 # git plumbing in a bare repository writes the data blobs, and python3 -I
-# only parses JSON.
+# runs only this file's own checks of each record against main's.
 on:
-  # Only tests' own push runs on main pass the job's `if:`, and nothing from
-  # an artifact or a tree is executed.
+  # The job's `if:` admits push runs reporting branch main, a tag named main
+  # too; the push step's commit, repository and ancestry checks refuse the
+  # rest. Nothing from an artifact or a tree is executed.
   workflow_run:  # zizmor: ignore[dangerous-triggers]
     workflows: [tests]
     types: [completed]
@@ -44,7 +45,7 @@ jobs:
             "repos/$GIT_COAUTHORSHIP_REPO/actions/runs/$GIT_COAUTHORSHIP_RUN_ID/artifacts" \
             --jq '.artifacts[] | select(.expired != true) | .name')"
           legs=""
-          for leg in coverage; do
+          for leg in coverage perf; do
             if grep -qx "ratchet-$leg" <<< "$names"; then
               legs="$legs $leg"
               echo "$leg=true" >> "$GITHUB_OUTPUT"
@@ -61,7 +62,16 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
 
-      - name: Push the raised records to main
+      - name: Download the performance ratchet data
+        if: steps.list.outputs.perf == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ratchet-perf
+          path: ${{ runner.temp }}/ratchet-data/perf
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Push the staged records to main
         if: steps.list.outputs.legs != ''
         env:
           GIT_COAUTHORSHIP_DEPLOY_KEY: ${{ secrets.MASTER_PUSH_DEPLOY_KEY }}
@@ -70,10 +80,29 @@ jobs:
           GIT_COAUTHORSHIP_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           GIT_COAUTHORSHIP_HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
         run: |
-          declare -A record=([coverage]=.github/ci-thresholds.json)
-          declare -A raises=([coverage]='the coverage floor')
-          # Each leg's check of its new record (argv 1) against main's (argv 2): the closed schema, and no lower floor.
-          declare -A check=([coverage]='
+          declare -A record=([coverage]=.github/ci-thresholds.json [perf]=.github/perf-budgets.json)
+          declare -A change=([coverage]='raise the coverage floor' [perf]='lower the performance budget')
+          # Each leg's check of its new record (argv 1) against main's (argv 2): the closed schema, and no
+          # lower floor; for the budget, nothing changed but counts, none of them higher.
+          declare -A check=([perf]='
+          import json, sys
+          label = sys.argv[3]
+          def budget(path):
+              try:
+                  doc = json.load(open(path, encoding="utf-8"))
+              except ValueError as error:
+                  sys.exit(f"{label}: refusing a record that is not JSON: {error}")
+              ok = type(doc) is dict and set(doc) == {"schema_version", "counter", "tolerance_pct", "toolchain", "workloads"}
+              ok = ok and type(doc["schema_version"]) is int and doc["schema_version"] == 1 and doc["counter"] == "callgrind-ir"
+              if not (ok and type(doc["workloads"]) is dict and all(type(v) is int and v > 0 for v in doc["workloads"].values())):
+                  sys.exit(f"{label}: refusing a record outside the schema")
+              return doc.pop("workloads"), doc
+          (new, rest), (old, main) = budget(sys.argv[1]), budget(sys.argv[2])
+          if rest != main or set(new) != set(old):
+              sys.exit(f"{label}: refusing a record that changes more than the counts on main")
+          if any(new[name] > old[name] for name in old):
+              sys.exit(f"{label}: refusing a count above the one on main")
+          ' [coverage]='
           import json, sys
           label = sys.argv[3]
           def floor(path):
@@ -93,7 +122,7 @@ jobs:
               sys.exit(f"{label}: refusing a floor below the one on main")
           ')
           drop() {
-            echo "::notice::Dropped: $1; the next main push raises instead"
+            echo "::notice::Dropped: $1; the next main push stages its records afresh"
             echo "### Dropped: $1" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           }
@@ -176,7 +205,7 @@ jobs:
             python3 -I -c "${check[$leg]}" "$leg.json" "$leg.main.json" "$path"
             blob="$(git -C "$scratch" hash-object -w "$work/$leg.json")"
             git -C "$scratch" update-index --add --cacheinfo 100644 "$blob" "$path"
-            what+=("${raises[$leg]}")
+            what+=("${change[$leg]}")
           done
 
           tree="$(git -C "$scratch" write-tree)"
@@ -185,7 +214,7 @@ jobs:
             exit 0
           fi
           subject="$(printf '%s and ' "${what[@]}")"
-          message="chore(ratchet): raise ${subject% and } (automated)"
+          message="chore(ratchet): ${subject% and } (automated)"
           git -C "$scratch" config user.name 'github-actions[bot]'
           git -C "$scratch" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           commit="$(git -C "$scratch" commit-tree "$tree" -p "$fetched" -m "$message")"
