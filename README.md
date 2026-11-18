@@ -90,15 +90,22 @@ workflow's `perf` job builds a fixed 20,000-commit history with
 `git fast-import` (`.github/scripts/perf_history.py`), then runs each
 declared workload under valgrind callgrind: `author-stats` over the whole
 history, and `reauthor --older`'s gap mapping, built as `main()` builds it
-and stopped before git-filter-repo rewrites anything. It counts the
-instructions the Python process retires. git runs uncounted: it is the
-runner's binary, so its count would move with git releases rather than this
-code, while the Python side of every git call (spawning it, reading and
+and stopped before git-filter-repo rewrites anything. The count runs in the
+image `.github/perf/Dockerfile` builds: Python at a pinned digest, with
+valgrind and git from the Debian snapshot that base image names as its own
+source, so the digest fixes every package. A toolchain change is therefore
+always a commit, Dependabot's digest bump included. When the bumped image
+builds, its pull request reads "not compared" until it carries the rebaseline
+commit; when the new base carries a libc6 newer than its own snapshot (whose
+libc6-dbg valgrind needs at the same revision), the image build itself fails
+with apt's exit 100, and the bump needs a newer base or a hand fix. It counts the instructions the
+Python process retires. git runs uncounted: it is a separate C program, so
+its count would move with git releases rather than this code, while the Python side of every git call (spawning it, reading and
 parsing its output) is still counted. The gate fails when a count exceeds
 its budget in `.github/perf-budgets.json` by more than `tolerance_pct`, when
 a declared workload is missing from the measurement or an undeclared one
-appears, or when the runner's Python, valgrind or libc, package revision
-included, is not the one the budget records. Every green push to `main` lowers a budget
+appears, or when the image, its Python, valgrind or libc (package revisions
+included) is not the one the budget records. Every green push to `main` lowers a budget
 its workload now undercuts by more than half the tolerance, through
 `ratchet push`; nothing raises one automatically. A raise is its own commit,
 touching only the budget file, carrying a
