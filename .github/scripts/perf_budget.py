@@ -130,10 +130,11 @@ def current_toolchain() -> dict[str, str]:
 def package(name: str) -> str:
     """The installed package's revision, so a distribution patch to it reads as another toolchain."""
     try:
-        done = subprocess.run(["dpkg-query", "-W", "-f", "${Version}", name], capture_output=True, text=True, check=False)
+        done = subprocess.run(["dpkg-query", "-W", "-f", "${Version}\\n", name], capture_output=True, text=True, check=False)
     except OSError:
         return ""
-    return f", package {name} {done.stdout.strip()}" if done.returncode == 0 and done.stdout.strip() else ""
+    versions = " ".join(done.stdout.split())
+    return f", package {name} {versions}" if done.returncode == 0 and versions else ""
 
 
 def measure(work: Path) -> dict:
