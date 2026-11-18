@@ -83,6 +83,8 @@ def jobs(name: str) -> dict[str, dict]:
     """Each job's effective contents level, needs, `if:` and steps."""
     lines = lists.read(name).splitlines()
     top = yml.top_level_keys(lines, "permissions")
+    if len(top) > 1:
+        raise WorkflowError(f"{name}: {len(top)} top-level `permissions:` keys")
     level_entry = None
     if top:
         index, match = top[0]
@@ -180,6 +182,9 @@ class WriteJobs(unittest.TestCase):
                          {"a": "write", "b": "none", "c": "none", "d": "read"})
         with unittest.mock.patch.object(lists, "read", lambda name: "jobs:\n  a:\n    steps:\n      - run: x\n"):
             self.assertEqual(jobs("x.yml")["a"]["contents"], "write")
+        twice = "permissions: {}\npermissions: write-all\njobs:\n  a:\n    steps:\n      - run: x\n"
+        with unittest.mock.patch.object(lists, "read", lambda name: twice), self.assertRaises(WorkflowError):
+            jobs("x.yml")
 
 
 STUB = """
