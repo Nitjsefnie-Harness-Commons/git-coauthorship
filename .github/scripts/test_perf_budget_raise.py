@@ -134,6 +134,18 @@ class Raise(unittest.TestCase):
         declared = self.commit({BUDGET: budget(900000)}, declare("workloads.author-stats", 501, 900000))
         self.assert_clean(self.pull(declared))
 
+    def test_a_readded_key_rises_from_the_last_value_on_its_own_ancestry(self) -> None:
+        document = json.loads(budget())
+        del document["workloads"]["author-stats"]
+        self.git("checkout", "-q", "-b", "side")
+        self.commit({BUDGET: json.dumps(document), "tool.py": "x = 2\n"})
+        readded = self.commit({BUDGET: budget(800000), "tool.py": "x = 3\n"})
+        self.git("checkout", "-q", "main")
+        self.commit({BUDGET: budget(900000)}, declare("workloads.author-stats", 500, 900000))
+        self.git("merge", "-q", "--no-edit", "-X", "theirs", "side")
+        done = self.pull(self.git("rev-parse", "HEAD"))
+        self.assert_refused(done, f"{readded[:12]}: {BUDGET}: workloads.author-stats rose 500 -> 800000 on a commit that also touches tool.py")
+
     def test_chained_declared_steps_reach_their_last_value(self) -> None:
         self.commit({BUDGET: budget(600)}, declare("workloads.author-stats", 500, 600))
         self.commit({BUDGET: budget(550), "tool.py": "x = 2\n"})
