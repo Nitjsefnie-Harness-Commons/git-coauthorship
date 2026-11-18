@@ -19,4 +19,4 @@
 # the functions, and each one errors at setup with `fixture 'tmp' not
 # found` (or `'_tmp'`). The speed comparator needs --junitxml, which only
 # pytest emits, so there is no timing harness to build the gate on.
-coverage==7.15.4
+coverage==7.17.3
