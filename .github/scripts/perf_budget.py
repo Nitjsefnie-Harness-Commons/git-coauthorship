@@ -31,7 +31,9 @@ DOCUMENT = ".github/perf-budgets.json"
 COUNTER = "callgrind-ir"
 SCHEMA_VERSION = 1
 FIELDS = {"schema_version", "counter", "tolerance_pct", "toolchain", "workloads"}
-TOOLCHAIN = ("python", "valgrind", "libc")
+TOOLCHAIN = ("python", "valgrind", "libc", "image")
+# The perf job sets this to its Dockerfile's FROM reference, digest included.
+IMAGE_ENV = "GIT_COAUTHORSHIP_PERF_IMAGE"
 DEFAULT_TOLERANCE_PCT = 1.0
 # name -> (argv after the interpreter, run in the history; exit status; stdout prefix). The history
 # has gaps on purpose, so author-stats exits 1; perf_reauthor_mapping.py builds reauthor --older's
@@ -124,7 +126,8 @@ def current_toolchain() -> dict[str, str]:
     except (OSError, subprocess.CalledProcessError) as error:
         raise HarnessError(f"valgrind --version failed: {error}") from None
     return {"python": sys.version.splitlines()[0], "valgrind": valgrind.strip() + package("valgrind"),
-            "libc": (" ".join(platform.libc_ver()).strip() or "unknown") + package("libc6")}
+            "libc": (" ".join(platform.libc_ver()).strip() or "unknown") + package("libc6"),
+            "image": os.environ.get(IMAGE_ENV) or "unpinned"}
 
 
 def package(name: str) -> str:
