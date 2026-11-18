@@ -69,7 +69,7 @@ an informational report on the coverage of their changed lines
 
 | Workflow | What it does |
 | --- | --- |
-| `tests` | Every pull request and every push to `main` not limited to Markdown, `LICENSE` or `.gitignore`, like `lint`, `types` and `audit`, so each commit gets one run. `run_tests.py` across every OS × Python pair, plus a single-run coverage job — the matrix would otherwise report the same coverage number once per pair. |
+| `tests` | Every pull request and every push to `main` not limited to Markdown, `LICENSE` or `.gitignore`, like `lint`, `types` and `audit`, so each commit gets one run. `run_tests.py` across every OS × Python pair, plus a single-run coverage job — the matrix would otherwise report the same coverage number once per pair — and the `perf` instruction-count gate below. |
 | `lint` / `types` | pylint + pycodestyle, and pyright. |
 | `codeql` | Security analysis of the Python package and the workflows (`actions`). Findings go to the Security tab, never the build. Runs on every push to any branch, whatever files it touches, and on fork pull requests; a pull request from this repository skips it, as its head's push already published `analyze (python)`. Weekly cron on top of push, because a query published today would otherwise only ever run against files touched after it shipped. |
 | `audit` | `pip-audit` over every requirements manifest, each of which hash-pins its tool's full transitive tree. **Daily** cron: this answers "is a version we froze months ago still safe", and that answer changes with no commit here to hang it on. |
@@ -82,14 +82,27 @@ an informational report on the coverage of their changed lines
 | `pr gate` | `Nitjsefnie-Actions/pr-gate`: checks a pull-request description against `.github/PULL_REQUEST_TEMPLATE.md` and its assigned issues, plus commit attribution and Conventional Commits subjects. |
 | `comment share` | `Nitjsefnie-Actions/comment-ratchet`: gates each tracked source file's comment share (target 15%) against `.github/comment-share.json`; the default branch commits its own tightened records. |
 | `size baseline` | `Nitjsefnie-Actions/size-ratchet`: gates file line counts against per-type ceilings and `.github/size-baseline.json`, and budgets the `tests/` tree's total; the default branch commits its own records. |
-| `ratchet push` | After a green `tests` push run on `main`, commits the raised coverage floor that run staged as an artifact, with the `main-push` environment's deploy key. It checks out no code and runs nothing from the tree, and drops the raise when `main` has moved on anything but the records. |
+| `ratchet push` | After a green `tests` push run on `main`, commits the raised coverage floor and the lowered performance budget that run staged as artifacts, with the `main-push` environment's deploy key. It checks out no code and runs nothing from the tree, and drops the change when `main` has moved on anything but the records. |
 | `pin test screen` | `Nitjsefnie-Actions/pin-guard`: lists test lines that assert on a pinned dependency version as review comments; not a gate. |
 
-**There is deliberately no speed gate here**, unlike the dashboard repos.
-pytest cannot run these suites — the tests are plain functions taking
-helper arguments, which pytest reads as fixture requests — and the
-comparator needs `--junitxml`, which only pytest emits. Rather than
-reshape the tests to suit a gate, the gate is omitted.
+**The performance gate counts instructions, never time.** The `tests`
+workflow's `perf` job builds a fixed 20,000-commit history with
+`git fast-import` (`.github/scripts/perf_history.py`), then runs each
+declared workload under valgrind callgrind: `author-stats` over the whole
+history, and `reauthor --older`'s gap mapping, built as `main()` builds it
+and stopped before git-filter-repo rewrites anything. It counts the
+instructions the Python process retires (git runs uncounted) and fails
+when a count exceeds its budget in `.github/perf-budgets.json` by more than
+`tolerance_pct`, when a declared workload is missing from the measurement or
+an undeclared one appears, or when the runner's Python, valgrind or libc is
+not the one the budget records. Every green push to `main` lowers a budget
+its workload now undercuts by more than half the tolerance, through
+`ratchet push`; nothing raises one automatically. A raise is its own commit,
+touching only the budget file, carrying a
+`Budget-Raise: .github/perf-budgets.json <key> <from> -> <to>` line for each
+raised key: `perf_budget.py rebaseline` rewrites the budget from a run's
+`perf-measurement` artifact and prints those lines. Exit 3 means the
+harness broke, never that a budget was exceeded.
 
 **Releasing = bumping `__version__`.** `tag` creates the tag, `release`
 publishes from it. Nothing bumps the version automatically: deciding
