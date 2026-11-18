@@ -72,6 +72,26 @@ jobs:
         run: |
           declare -A record=([coverage]=.github/ci-thresholds.json)
           declare -A raises=([coverage]='the coverage floor')
+          # Each leg's check of its new record (argv 1) against main's (argv 2): the closed schema, and no lower floor.
+          declare -A check=([coverage]='
+          import json, sys
+          label = sys.argv[3]
+          def floor(path):
+              try:
+                  doc = json.load(open(path, encoding="utf-8"))
+              except ValueError as error:
+                  sys.exit(f"{label}: refusing a record that is not JSON: {error}")
+              ok = type(doc) is dict and set(doc) == {"schema_version", "coverage"}
+              ok = ok and type(doc["schema_version"]) is int and doc["schema_version"] == 1
+              ok = ok and type(doc["coverage"]) is dict and set(doc["coverage"]) == {"python"}
+              python = doc["coverage"]["python"] if ok else None
+              ok = ok and type(python) is dict and set(python) == {"floor", "measured"}
+              if not (ok and all(type(v) in (int, float) and 0 <= v <= 100 for v in python.values())):
+                  sys.exit(f"{label}: refusing a record outside the schema")
+              return python["floor"]
+          if floor(sys.argv[1]) < floor(sys.argv[2]):
+              sys.exit(f"{label}: refusing a floor below the one on main")
+          ')
           drop() {
             echo "::notice::Dropped: $1; the next main push raises instead"
             echo "### Dropped: $1" >> "$GITHUB_STEP_SUMMARY"
@@ -152,8 +172,8 @@ jobs:
               git -C "$scratch" show "$base:$path" > "$leg.base.json" || drop "the measured $path is unreadable"
               git merge-file "$leg.json" "$leg.base.json" "$staged" || drop "$path changed on main since the measure"
             fi
-            python3 -I -c 'import json, sys; json.load(open(sys.argv[1], encoding="utf-8"))' "$leg.json" \
-              || drop "the merged $path is not JSON"
+            git -C "$scratch" show "$fetched:$path" > "$leg.main.json"
+            python3 -I -c "${check[$leg]}" "$leg.json" "$leg.main.json" "$path"
             blob="$(git -C "$scratch" hash-object -w "$work/$leg.json")"
             git -C "$scratch" update-index --add --cacheinfo 100644 "$blob" "$path"
             what+=("${raises[$leg]}")
