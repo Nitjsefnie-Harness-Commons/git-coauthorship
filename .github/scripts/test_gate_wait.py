@@ -80,7 +80,7 @@ class Clock:
         self.now += seconds
 
 
-class Wait(unittest.TestCase):
+class WaitCase(unittest.TestCase):
     def wait(self, api: Api, required: tuple[str, ...] = REQUIRED,
              exclude: tuple[str, ...] = OWN, **keywords) -> tuple[int, str, Clock]:
         clock = Clock()
@@ -101,6 +101,8 @@ class Wait(unittest.TestCase):
         self.assertIn(fragment, out)
         return clock
 
+
+class Wait(WaitCase):
     def test_every_gate_and_check_green_passes_without_waiting(self) -> None:
         clock = self.assert_passes(api((GREEN + [check("other")], [run()])))
         self.assertEqual(clock.sleeps, [])
@@ -191,6 +193,30 @@ class Wait(unittest.TestCase):
         self.assert_refuses(api((GREEN + [check("CodeQL", "failure", suite=9)], [run()])), "CodeQL")
 
 
+class RefuseFailed(WaitCase):
+    """A dispatch refuses a commit whose own push-run check ended red, which
+    the release would refuse; the wait itself still excludes those names."""
+
+    def test_a_red_push_run_check_of_a_named_job_refuses_before_waiting(self) -> None:
+        for name, conclusion in (("release-readiness", "failure"), ("tag", "failure"),
+                                 ("release-readiness", "cancelled"), ("tag", "timed_out")):
+            with self.subTest(name=name, conclusion=conclusion):
+                pending = [check("lint", None, status="queued"), check(name, conclusion, suite=2)]
+                clock = self.assert_refuses(api((pending, [run(), run(2)])), "re-run",
+                                            refuse_failed=OWN)
+                self.assertEqual(clock.sleeps, [])
+
+    def test_a_green_skipped_or_absent_named_check_lets_the_wait_proceed(self) -> None:
+        for own in ([], [check("release-readiness", suite=2)], [check("tag", "skipped", suite=2)],
+                    [check("release-readiness", None, suite=2, status="in_progress")]):
+            with self.subTest(own=own):
+                self.assert_passes(api((GREEN + own, [run(), run(2)])), refuse_failed=OWN)
+
+    def test_a_red_named_check_from_another_event_does_not_refuse(self) -> None:
+        own = [check("release-readiness", "failure", suite=2)]
+        self.assert_passes(api((GREEN + own, [run(), run(2, "workflow_dispatch")])), refuse_failed=OWN)
+
+
 class CommandLine(unittest.TestCase):
     """main() through a stub `gh`, so the real fetch, argument parsing and the
     shipped gate list run."""
@@ -245,6 +271,15 @@ sys.stdout.write(json.dumps({key: scenario[key] if page == 1 else []}))
         code, out = self.main(scenario, "--deadline-minutes", "0")
         self.assertEqual(code, 1, out)
         self.assertIn(gate.REQUIRED_GATES[0], out)
+
+    def test_refuse_failed_names_a_job_whose_red_check_refuses(self) -> None:
+        scenario = {"check_runs": [check(name) for name in gate.REQUIRED_GATES] + [check("tag", "failure")],
+                    "workflow_runs": [run()]}
+        code, out = self.main(scenario, "--refuse-failed", "tag")
+        self.assertEqual(code, 1, out)
+        self.assertIn("re-run", out)
+        code, out = self.main(scenario, "--refuse-failed", "release-readiness")
+        self.assertEqual(code, 0, out)
 
     def test_a_failed_api_call_is_refused_not_read_as_empty(self) -> None:
         code, out = self.main({"fail": True})

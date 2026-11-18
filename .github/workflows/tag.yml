@@ -24,7 +24,9 @@ name: tag
 # before the wait. Re-running a bump commit's failed gates creates no push,
 # so no run; to tag the bump commit itself while its version is still
 # untagged, re-run its gates green, then re-run its red tag run, whose
-# checks release.yml's wait judges (a later attempt replaces them).
+# checks release.yml's wait judges (a later attempt replaces them). A
+# dispatch refuses such a commit before tagging; it tags one whose tag
+# run is green or absent.
 
 on:
   push:
@@ -166,9 +168,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           SHA: ${{ steps.version.outputs.sha }}
+        # A dispatch refuses a commit whose push run of this workflow ended
+        # red: release.yml judges those checks, so it would refuse the tag.
         run: |
+          refuse=()
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            refuse=(--refuse-failed release-readiness --refuse-failed tag)
+          fi
           python3 .github/scripts/gate_wait.py --repo "$REPO" --sha "$SHA" \
-            --exclude release-readiness --exclude tag
+            --exclude release-readiness --exclude tag "${refuse[@]}"
 
   tag:
     needs: release-readiness

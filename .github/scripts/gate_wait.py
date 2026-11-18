@@ -75,8 +75,13 @@ def show(rows: list[Row], heading: str) -> None:
 def wait(fetch: Fetch, repo: str, sha: str, exclude: tuple[str, ...],
          required: tuple[str, ...] = REQUIRED_GATES, deadline_seconds: float = DEADLINE_SECONDS,
          clock: Callable[[], float] = time.monotonic,
-         sleep: Callable[[float], None] = time.sleep) -> int:
+         sleep: Callable[[float], None] = time.sleep, refuse_failed: tuple[str, ...] = ()) -> int:
     end = clock() + deadline_seconds
+    red = [row for row in (judged_rows(fetch, repo, sha, ()) if refuse_failed else [])
+           if row[2] in refuse_failed and row[0] == "completed" and row[1] not in PASSING]
+    if red:
+        show(red, "Refusing: a release would judge these red push-run checks; re-run their run instead:")
+        return 1
     while True:
         rows = judged_rows(fetch, repo, sha, exclude)
         pending = [row for row in rows if row[0] != "completed"]
@@ -104,11 +109,14 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--sha", required=True)
     parser.add_argument("--exclude", action="append", required=True,
                         help="this workflow's own job name, matched exactly; repeat per job")
+    parser.add_argument("--refuse-failed", action="append", default=[],
+                        help="refuse at once if this job's push-run check ended red; repeat per job")
     parser.add_argument("--deadline-minutes", type=float, default=DEADLINE_SECONDS / 60)
     arguments = parser.parse_args(argv)
     try:
         return wait(gh_get, arguments.repo, arguments.sha, tuple(arguments.exclude),
-                    deadline_seconds=arguments.deadline_minutes * 60)
+                    deadline_seconds=arguments.deadline_minutes * 60,
+                    refuse_failed=tuple(arguments.refuse_failed))
     except (GateWaitError, KeyError, TypeError) as error:
         print(f"gate wait: cannot read the checks: {error!r}", file=sys.stderr)
         return 1
