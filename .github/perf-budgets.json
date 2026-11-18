@@ -3,13 +3,13 @@
   "counter": "callgrind-ir",
   "tolerance_pct": 1.0,
   "toolchain": {
-    "python": "3.13.14 (main, Jul 22 2026, 12:09:17) [GCC 14.2.0]",
-    "valgrind": "valgrind-3.24.0",
-    "libc": "glibc 2.41",
-    "image": "unpinned"
+    "python": "3.13.18 (main, Nov  5 2026, 07:59:38) [GCC 14.2.0]",
+    "valgrind": "valgrind-3.24.0, package valgrind 1:3.24.0-3",
+    "libc": "glibc 2.41, package libc6 2.41-12+deb13u4",
+    "image": "python:3.13.18-slim-trixie@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90"
   },
   "workloads": {
-    "author-stats": 524370436,
-    "reauthor-mapping": 390089993
+    "author-stats": 588322263,
+    "reauthor-mapping": 430438980
   }
 }
