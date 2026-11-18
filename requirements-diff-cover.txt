@@ -1,6 +1,6 @@
 # The diff-cover toolchain for the informational changed-lines report in
-# tests.yml's coverage job, which installs it on pull requests only, after
-# the measurement and the gate have their numbers. Pinned with hashes for the
+# tests.yml's coverage job, which installs it on pull requests only, once
+# the measurement has written coverage.xml. Pinned with hashes for the
 # full dependency tree for the same reason as requirements-dev.txt; CI
 # installs with --require-hashes, and requirements-dev.txt says what
 # Dependabot's bumps do and do not check.
