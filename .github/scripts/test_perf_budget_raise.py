@@ -113,6 +113,43 @@ class Raise(unittest.TestCase):
         head = self.commit({BUDGET: budget(900), "tool.py": "x = 3\n"})
         self.assert_refused(self.pull(head), "net raised")
 
+    def test_a_declared_step_licenses_nothing_past_its_own_value(self) -> None:
+        document = json.loads(budget())
+        del document["workloads"]["author-stats"]
+        self.commit({BUDGET: budget(501)}, declare("workloads.author-stats", 500, 501))
+        self.commit({BUDGET: json.dumps(document), "tool.py": "x = 2\n"})
+        head = self.commit({BUDGET: budget(900000), "tool.py": "x = 3\n"})
+        for done in (self.pull(head), self.judge("--event", "push", "--before", self.base, "--head", head)):
+            self.assert_refused(done, "workloads.author-stats net raised 500 -> 900000 past every declared step")
+
+    def test_chained_declared_steps_reach_their_last_value(self) -> None:
+        self.commit({BUDGET: budget(600)}, declare("workloads.author-stats", 500, 600))
+        self.commit({BUDGET: budget(550), "tool.py": "x = 2\n"})
+        head = self.commit({BUDGET: budget(700)}, declare("workloads.author-stats", 550, 700))
+        self.assert_clean(self.pull(head))
+
+    def test_a_budget_unreadable_at_any_commit_cannot_be_judged(self) -> None:
+        self.commit({BUDGET: budget(501)}, declare("workloads.author-stats", 500, 501))
+        for broken in ("{", "[]", budget().replace("500", '"500"'), budget().replace("500", "NaN")):
+            with self.subTest(broken=broken):
+                self.commit({BUDGET: broken, "tool.py": "x = 2\n"})
+                head = self.commit({BUDGET: budget(900000), "tool.py": "x = 3\n"})
+                done = self.pull(head)
+                self.assertEqual(done.returncode, 2, done.stdout)
+                self.assertIn("is not a readable budget", done.stderr)
+                self.git("reset", "-q", "--hard", "HEAD~2")
+
+    def test_a_crash_exits_2_not_1(self) -> None:
+        done = subprocess.run([sys.executable, "-I", str(SCRIPT), "--event", "push", "--before", self.base,
+                               "--head", self.base], cwd=self.repo, env={**self.env, "PATH": ""},
+                              capture_output=True, text=True, check=False)
+        self.assertEqual(done.returncode, 2, done.stdout)
+        self.assertIn("could not be judged", done.stderr)
+
+    def test_a_non_finite_declaration_does_not_parse(self) -> None:
+        head = self.commit({BUDGET: budget(600)}, f"Budget-Raise: {BUDGET} workloads.author-stats sNaN -> 600")
+        self.assert_refused(self.pull(head), "does not parse")
+
     def test_deleting_the_budget_is_refused(self) -> None:
         self.assert_refused(self.pull(self.commit({BUDGET: None})), "deleted")
 
