@@ -220,6 +220,9 @@ class Measure(unittest.TestCase):
         stub = self.root / "bin" / "valgrind"
         stub.write_text(f"#!{sys.executable}\n{STUB}", encoding="utf-8")
         stub.chmod(0o755)
+        dpkg = self.root / "bin" / "dpkg-query"
+        dpkg.write_text(f"#!{sys.executable}\nimport sys\nprint(sys.argv[-1] + '-rev', end='')\n", encoding="utf-8")
+        dpkg.chmod(0o755)
         shutil.copyfile(CAPTURE, self.root / "bin" / "capture.out")
         self.env = {**os.environ, "PATH": f"{self.root / 'bin'}{os.pathsep}{os.environ['PATH']}"}
 
@@ -234,7 +237,9 @@ class Measure(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         result = json.loads((self.root / "m.json").read_text(encoding="utf-8"))
         self.assertEqual(result["counts"], {name: 916 for name in pb.WORKLOADS})
-        self.assertEqual((result["counter"], result["toolchain"]["valgrind"]), ("callgrind-ir", "valgrind-stub"))
+        self.assertEqual((result["counter"], result["toolchain"]["valgrind"]),
+                         ("callgrind-ir", "valgrind-stub, package valgrind valgrind-rev"))
+        self.assertTrue(result["toolchain"]["libc"].endswith(", package libc6 libc6-rev"), result["toolchain"])
         self.assertEqual(set(result["wall_seconds"]), set(pb.WORKLOADS))
         self.assertEqual(pb.validate_measurement(copy.deepcopy(result)), result)
 
