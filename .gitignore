@@ -49,6 +49,8 @@
 !/.github/ci-thresholds.json
 !/.github/comment-share.json
 !/.github/dependabot.yml
+!/.github/perf/
+!/.github/perf/Dockerfile
 !/.github/perf-budgets.json
 !/.github/size-baseline.json
 !/.github/scripts/

@@ -59,3 +59,24 @@ updates:
         applies-to: security-updates
         patterns:
           - "*"
+
+  # The perf image's digest. A bump changes the counted toolchain: when the
+  # image builds, its pull request passes once a rebaseline commit is added;
+  # a base with a libc6 newer than its own snapshot fails the build (apt exit
+  # 100) and needs a newer base or a hand fix. 3.13 stays the line.
+  - package-ecosystem: docker
+    directory: "/.github/perf"
+    schedule:
+      interval: weekly
+      day: wednesday
+      time: "04:30"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+      include: scope
+    labels:
+      - dependencies
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]

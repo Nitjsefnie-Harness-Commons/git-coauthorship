@@ -150,7 +150,8 @@ class ThisRepository(Fixture):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout.splitlines(), [
             ".coveragerc", ".github/ci-thresholds.json",
-            ".github/comment-share.json", ".github/perf-budgets.json", ".github/scripts/commit_scopes.py",
+            ".github/comment-share.json", ".github/perf-budgets.json", ".github/perf/Dockerfile",
+            ".github/scripts/commit_scopes.py",
             ".github/scripts/conflict_markers.sh",
             ".github/scripts/gate_base_freshness.py", ".github/scripts/gate_wait.py",
             ".github/scripts/perf_budget.py", ".github/scripts/perf_budget_raise.py",

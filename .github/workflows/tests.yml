@@ -234,10 +234,11 @@ jobs:
 
   perf:
     # Instructions retired under callgrind, never wall time; perf_budget.py
-    # says what is counted. The image is pinned because its libc and valgrind
-    # are part of every count.
+    # says what is counted. The count runs in the image .github/perf/Dockerfile
+    # pins, so the toolchain moves only with a commit; the steps around it
+    # read no count and use the runner's tools.
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -248,14 +249,11 @@ jobs:
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.13.14"
+          python-version: "3.13"
 
-      - name: Install valgrind
-        timeout-minutes: 5
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends valgrind
-          valgrind --version
+      - name: Build the perf image
+        timeout-minutes: 10
+        run: docker build --tag git-coauthorship-perf .github/perf
 
       - name: Refuse an undeclared budget raise
         env:
@@ -267,9 +265,15 @@ jobs:
           python .github/scripts/perf_budget_raise.py --event "$GIT_COAUTHORSHIP_EVENT" \
             --base "$GIT_COAUTHORSHIP_BASE_SHA" --before "$GIT_COAUTHORSHIP_BEFORE_SHA" --head "$GIT_COAUTHORSHIP_HEAD_SHA"
 
-      - name: Measure
+      - name: Measure in the perf image
         id: measure
-        run: python .github/scripts/perf_budget.py measure --work "$RUNNER_TEMP/perf" --out "$RUNNER_TEMP/perf-measurement.json"
+        run: |
+          image="$(sed -n 's/^FROM //p' .github/perf/Dockerfile)"
+          case "$image" in *@sha256:*) ;; *) echo "the perf Dockerfile pins no digest: $image" >&2; exit 1 ;; esac
+          # valgrind refuses Docker's near-unlimited open-file limit; paths inside are fixed, so counts compare.
+          docker run --rm --ulimit nofile=65536:65536 --env "GIT_COAUTHORSHIP_PERF_IMAGE=$image" \
+            --volume "$GITHUB_WORKSPACE:/src:ro" --volume "$RUNNER_TEMP:/out" --workdir /src git-coauthorship-perf \
+            python .github/scripts/perf_budget.py measure --work /tmp/perf --out /out/perf-measurement.json
 
       - name: Upload the measurement
         if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
