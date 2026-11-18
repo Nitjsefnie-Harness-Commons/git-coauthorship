@@ -19,8 +19,8 @@ disable=
 # strings are part of git's command interface, not Python formatting that can
 # be converted to f-strings without changing the command sent to git.
     consider-using-f-string,
-# Two independent command-line tools deliberately share no implementation
-# code: each must be readable and changeable without regard to the other.
+# Two independent command-line tools deliberately share only _trailers.py's
+# co-author rule: each must be readable and changeable without the other.
 # They land on the same idioms for argument parsing and output, and that
 # repetition is the price of independent histories, not an oversight.
     duplicate-code,
