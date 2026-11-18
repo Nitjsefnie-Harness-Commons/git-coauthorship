@@ -123,8 +123,17 @@ def current_toolchain() -> dict[str, str]:
         valgrind = subprocess.run(["valgrind", "--version"], capture_output=True, text=True, check=True).stdout
     except (OSError, subprocess.CalledProcessError) as error:
         raise HarnessError(f"valgrind --version failed: {error}") from None
-    return {"python": sys.version.splitlines()[0], "valgrind": valgrind.strip(),
-            "libc": " ".join(platform.libc_ver()).strip() or "unknown"}
+    return {"python": sys.version.splitlines()[0], "valgrind": valgrind.strip() + package("valgrind"),
+            "libc": (" ".join(platform.libc_ver()).strip() or "unknown") + package("libc6")}
+
+
+def package(name: str) -> str:
+    """The installed package's revision, so a distribution patch to it reads as another toolchain."""
+    try:
+        done = subprocess.run(["dpkg-query", "-W", "-f", "${Version}", name], capture_output=True, text=True, check=False)
+    except OSError:
+        return ""
+    return f", package {name} {done.stdout.strip()}" if done.returncode == 0 and done.stdout.strip() else ""
 
 
 def measure(work: Path) -> dict:
