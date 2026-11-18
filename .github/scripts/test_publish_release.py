@@ -1,4 +1,6 @@
-"""Drive publish_release.sh against a stub `gh` and pin every call it makes."""
+"""Run release.yml's publish step, read out of the workflow, against a stub
+`gh` and pin every call it makes."""
+import importlib.util
 import json
 import os
 import shutil
@@ -8,7 +10,31 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parent / "publish_release.sh"
+HERE = Path(__file__).resolve().parent
+WORKFLOW = HERE.parent / "workflows" / "release.yml"
+STEP = "Attach the wheel and its checksums to the release"
+
+spec = importlib.util.spec_from_file_location("gate_base_freshness", HERE / "gate_base_freshness.py")
+assert spec is not None and spec.loader is not None
+yml = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(yml)
+
+
+def step_run(text: str, name: str) -> str:
+    """The `run: |` body of the one step named `name`; refuses any other count."""
+    lines = text.splitlines()
+    starts = [index for index, line in enumerate(lines) if line.strip() == f"- name: {name}"]
+    if len(starts) != 1:
+        raise LookupError(f"{len(starts)} steps named {name!r}")
+    key = yml.indent_of(lines[starts[0]]) + 2
+    end = yml.block_end(lines, starts[0], key - 2)
+    runs = [index for index in range(starts[0] + 1, end)
+            if yml.indent_of(lines[index]) == key and lines[index].strip() == "run: |"]
+    if len(runs) != 1:
+        raise LookupError(f"{len(runs)} `run: |` blocks in step {name!r}")
+    return yml.block_scalar(lines, runs[0], key, end)[0] + "\n"
+
+
 REPO = "owner/repo"
 TAG = "v1.2.0"
 WHEEL = "dist/git_coauthorship-1.2.0-py3-none-any.whl"
@@ -53,6 +79,8 @@ class PublishRelease(unittest.TestCase):
         (self.root / WHEEL).write_bytes(b"wheel")
         (self.root / "dist" / "SHA256SUMS").write_text("sums\n", encoding="utf-8")
         self.log = self.root / "calls.jsonl"
+        self.script = self.root / "step.sh"
+        self.script.write_text(step_run(WORKFLOW.read_text(encoding="utf-8"), STEP), encoding="utf-8")
 
     def run_script(self, releases: str = "", fail: str = "",
                    ref: str = f"refs/tags/{TAG}") -> subprocess.CompletedProcess[str]:
@@ -61,7 +89,8 @@ class PublishRelease(unittest.TestCase):
                    GITHUB_REF=ref, GITHUB_REPOSITORY=REPO,
                    STUB_GH_LOG=str(self.log),
                    STUB_GH_SCENARIO=json.dumps({"releases": releases, "fail": fail}))
-        return subprocess.run(["bash", str(SCRIPT)], cwd=self.root, env=env,
+        # GitHub's own command for a `run:` with no `shell:`.
+        return subprocess.run(["bash", "-e", str(self.script)], cwd=self.root, env=env,
                               capture_output=True, text=True, check=False)
 
     def calls(self) -> list[list[str]]:
@@ -132,6 +161,15 @@ class PublishRelease(unittest.TestCase):
     def test_a_non_tag_ref_is_refused_before_any_call(self) -> None:
         result = self.run_script("", ref="refs/heads/main")
         self.assert_refused(result, [], "Not a tag ref (refs/heads/main); nothing to publish.")
+
+
+class StepRun(unittest.TestCase):
+    def test_a_step_named_other_than_once_or_without_a_block_run_is_refused(self) -> None:
+        step = "      - name: s\n        run: |\n          true\n"
+        for text in ("", step + step, "      - name: s\n        run: true\n"):
+            with self.subTest(text=text), self.assertRaises(LookupError):
+                step_run(text, "s")
+        self.assertEqual(step_run(step + "      - name: t\n        run: |\n          false\n", "s"), "true\n")
 
 
 if __name__ == "__main__":

@@ -152,7 +152,6 @@ class ThisRepository(Fixture):
             ".github/comment-share.json", ".github/scripts/commit_scopes.py",
             ".github/scripts/conflict_markers.sh",
             ".github/scripts/gate_base_freshness.py", ".github/scripts/gate_wait.py",
-            ".github/scripts/publish_release.sh",
             ".github/scripts/test_commit_scopes.py", ".github/scripts/test_conflict_markers.py",
             ".github/scripts/test_gate_base_freshness.py", ".github/scripts/test_gate_wait.py",
             ".github/scripts/test_publish_release.py", ".github/size-baseline.json",

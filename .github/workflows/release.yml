@@ -3,6 +3,10 @@ name: release
 # Publishes the wheel a consumer installs, with SHA256SUMS beside it: the
 # consumer's `sha256sum -c SHA256SUMS` (README, Install) is what ties a
 # downloaded wheel to the artifact this workflow built.
+#
+# Only release-publish can write, and it runs no repository code: it
+# attaches what the read-only build made, once the gates passed on the
+# tagged commit, whichever trigger started the run.
 
 on:
   push:
@@ -10,22 +14,46 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  publish:
+  release-gates:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The wait's 45 minutes, plus the checkout.
+    timeout-minutes: 50
+
+    permissions:
+      contents: read
+      checks: read
+      actions: read
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Nothing in this job pushes. Leaving the token in
-          # .git/config lets any later step reuse it.
+          persist-credentials: false
+
+      - name: Wait for the gates on the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 .github/scripts/gate_wait.py --repo "$REPO" --sha "$(git rev-parse HEAD)" \
+            --exclude release-gates --exclude release-build --exclude release-publish
+
+  release-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
           persist-credentials: false
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -56,15 +84,79 @@ jobs:
         # an option (shellcheck SC2035).
         run: sha256sum -- *.whl > SHA256SUMS
 
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-dist
+          path: dist/
+
+  release-publish:
+    needs: [release-gates, release-build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-dist
+          path: dist
+
+      - name: Verify the downloaded artifact against its checksums
+        working-directory: dist
+        run: sha256sum -c SHA256SUMS
+
       - name: Attach the wheel and its checksums to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        # `gh`, not a third-party action. This is the one job here holding
-        # contents: write, so every action it runs is code with permission
-        # to publish under this repo's name — and `gh` is preinstalled on
-        # the runner and maintained by GitHub. Dropping the dependency is a
-        # smaller supply chain for the step that needs it least.
+        # `gh`, preinstalled and maintained by GitHub, not a third-party
+        # action: every action here could publish under this repo's name.
         #
-        # A second run for a published tag fails loudly and replaces
-        # nothing. Assets go only into a draft, which is published last.
-        run: bash .github/scripts/publish_release.sh
+        # A published release is refused and never changed; assets go only
+        # into a draft, which is published last. Not `gh release view`: its
+        # "not found" can stand for a failed lookup.
+        run: |
+          case "${GITHUB_REF:-}" in
+            refs/tags/*) tag="${GITHUB_REF#refs/tags/}" ;;
+            *)
+              echo "Not a tag ref (${GITHUB_REF:-}); nothing to publish." >&2
+              echo "Push a v* tag — .github/workflows/tag.yml does that" >&2
+              echo "automatically when __version__ changes." >&2
+              exit 1
+              ;;
+          esac
+          repo="${GITHUB_REPOSITORY:?}"
+
+          releases=$(gh api --paginate "repos/$repo/releases?per_page=100" \
+            --jq '.[] | [.tag_name, .draft] | @tsv')
+
+          drafts=0
+          published=0
+          while IFS=$'\t' read -r name draft; do
+            [ "$name" = "$tag" ] || continue
+            case "$draft" in
+              true) drafts=$((drafts + 1)) ;;
+              false) published=$((published + 1)) ;;
+              *) echo "Release $tag has an unexpected draft flag '$draft'." >&2; exit 1 ;;
+            esac
+          done <<< "$releases"
+
+          if [ "$published" -gt 0 ]; then
+            echo "$tag was already published; its assets never change." >&2
+            echo "Bump __version__ to release again." >&2
+            exit 1
+          fi
+          if [ "$drafts" -gt 1 ]; then
+            echo "$drafts draft releases for $tag; delete all but one, then rerun." >&2
+            exit 1
+          fi
+
+          if [ "$drafts" -eq 0 ]; then
+            gh release create "$tag" --repo "$repo" --draft --title "$tag" --generate-notes
+          else
+            echo "Completing the draft release for $tag."
+          fi
+          gh release upload "$tag" --repo "$repo" dist/*.whl dist/SHA256SUMS --clobber
+          gh release edit "$tag" --repo "$repo" --draft=false
+          echo "Published $tag."
