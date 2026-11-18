@@ -20,12 +20,11 @@
 # own; .coveragerc's `patch = subprocess` (coverage 7.10 or later) measures
 # those too, each into a data file of its own until the combine.
 #
-# There is deliberately NO pytest here, and no speed.yml in this repo.
-# pytest cannot run the tests/ suites: the tests are plain functions taking
-# helper arguments, which pytest reads as fixture requests. It collects
-# the functions, and each one errors at setup with `fixture 'tmp' not
-# found` (or `'_tmp'`). The speed comparator needs --junitxml, which only
-# pytest emits, so there is no timing harness to build the gate on.
+# There is deliberately NO pytest here: it cannot run the tests/ suites,
+# whose tests are plain functions taking helper arguments that pytest reads
+# as fixture requests. Nothing here serves the performance gate either:
+# tests.yml's perf job counts instructions with the runner's apt valgrind
+# and the stdlib-only .github/scripts/perf_budget.py, installing no package.
 #
 # Resolved for every platform on Python 3.13; regenerate with:
 #   grep -oE '^(coverage|git-filter-repo)==[^ ]+' requirements-test.txt | uv pip compile - --universal --generate-hashes --no-annotate --no-header --no-emit-package pip --python-version 3.13
