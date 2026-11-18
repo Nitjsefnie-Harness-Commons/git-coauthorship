@@ -15,11 +15,16 @@ spec = importlib.util.spec_from_file_location("test_publish_release", HERE / "te
 assert spec is not None and spec.loader is not None
 publish = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(publish)
+spec = importlib.util.spec_from_file_location("test_release_path", HERE / "test_release_path.py")
+assert spec is not None and spec.loader is not None
+release = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(release)
 
 WORKFLOW = (HERE.parent / "workflows" / "ratchet-push.yml").read_text(encoding="utf-8")
 LIST = "List the triggering run's ratchet artifacts"
-PUSH = "Push the raised records to main"
+PUSH = "Push the staged records to main"
 RECORD = ".github/ci-thresholds.json"
+PERF = ".github/perf-budgets.json"
 MESSAGE = "chore(ratchet): raise the coverage floor (automated)"
 STUB = """
 import os, sys
@@ -37,6 +42,12 @@ if os.path.basename(sys.argv[0]) == "ssh-agent":
 def document(floor: float, measured: float) -> str:
     return json.dumps({"schema_version": 1, "coverage": {"python": {"floor": floor, "measured": measured}}},
                       indent=2) + "\n"
+
+
+def budget(author: object = 500, **change: object) -> str:
+    return json.dumps({"schema_version": 1, "counter": "callgrind-ir", "tolerance_pct": 1.0,
+                       "toolchain": {"python": "p", "valgrind": "v", "libc": "l"},
+                       "workloads": {"author-stats": author, "reauthor-mapping": 400}, **change}, indent=2) + "\n"
 
 
 class RatchetPush(unittest.TestCase):
@@ -62,7 +73,7 @@ class RatchetPush(unittest.TestCase):
         self.git("init", "-q", "--bare", "-b", "main", str(self.remote))
         self.work = self.root / "clone"
         self.git("clone", "-q", str(self.remote), str(self.work))
-        self.base = self.commit({RECORD: document(80.0, 81.5), "tool.py": "x = 1\n"})
+        self.base = self.commit({RECORD: document(80.0, 81.5), PERF: budget(), "tool.py": "x = 1\n"})
         self.env["GIT_COAUTHORSHIP_HEAD_SHA"] = self.base
         self.stage(document(83.7, 85.2), self.base)
 
@@ -81,10 +92,11 @@ class RatchetPush(unittest.TestCase):
         self.git("push", "-q", "origin", "HEAD:main", cwd=self.work)
         return self.git("rev-parse", "HEAD", cwd=self.work)
 
-    def stage(self, text: str, base: str, extra: str = "") -> None:
-        leg = self.root / "temp" / "ratchet-data" / "coverage"
+    def stage(self, text: str, base: str, extra: str = "", leg: str = "coverage") -> None:
+        record = PERF if leg == "perf" else RECORD
+        leg = self.root / "temp" / "ratchet-data" / leg
         leg.mkdir(parents=True, exist_ok=True)
-        (leg / "ci-thresholds.json").write_text(text, encoding="utf-8")
+        (leg / Path(record).name).write_text(text, encoding="utf-8")
         (leg / "base.txt").write_text(base + "\n", encoding="utf-8")
         if extra:
             (leg / extra).write_text("", encoding="utf-8")
@@ -113,6 +125,8 @@ class RatchetPush(unittest.TestCase):
 
     def test_the_listing_selects_each_present_leg(self) -> None:
         for names, output in (("wheel\nratchet-coverage\ncoverage-xml", "coverage=true\nlegs=coverage\n"),
+                              ("perf-measurement\nratchet-perf", "perf=true\nlegs=perf\n"),
+                              ("ratchet-perf\nratchet-coverage", "coverage=true\nperf=true\nlegs=coverage perf\n"),
                               ("wheel\nratchet-coverage-old\nratchet-", "legs=\n"), ("", "legs=\n")):
             with self.subTest(names=names):
                 (self.root / "output").write_text("", encoding="utf-8")
@@ -138,6 +152,38 @@ class RatchetPush(unittest.TestCase):
         self.assertEqual(self.git("--git-dir", str(self.remote), "show", f"{tip}:{RECORD}") + "\n",
                          document(83.7, 85.2))
         self.assertIn("ssh-add", (self.root / "calls.log").read_text(encoding="utf-8"))
+
+    def test_a_lowered_budget_lands_alone_or_beside_the_raised_floor(self) -> None:
+        self.stage(budget(450), self.base, leg="perf")
+        for legs, files, message in (("perf", [PERF], "chore(ratchet): lower the performance budget (automated)"),
+                                     ("coverage perf", [RECORD, PERF], "chore(ratchet): raise the coverage floor and "
+                                                                      "lower the performance budget (automated)")):
+            with self.subTest(legs=legs):
+                self.git("--git-dir", str(self.remote), "update-ref", "refs/heads/main", self.base)
+                done = self.run_step(PUSH, GIT_COAUTHORSHIP_LEGS=legs)
+                self.assertEqual(done.returncode, 0, done.stderr)
+                tip = self.main_tip()
+                self.assertEqual(self.git("--git-dir", str(self.remote), "log", "-1", "--format=%P%n%s", tip).splitlines(),
+                                 [self.base, message])
+                self.assertEqual(self.git("--git-dir", str(self.remote), "diff", "--name-only", self.base, tip).split(),
+                                 sorted(files))
+                self.assertEqual(self.git("--git-dir", str(self.remote), "show", f"{tip}:{PERF}") + "\n", budget(450))
+
+    def test_a_budget_off_the_schema_or_above_mains_is_refused(self) -> None:
+        workloads = {"author-stats": 450, "reauthor-mapping": 400}
+        for text in ("{", "[]", budget(501), budget(450.0), budget(0), budget(True), budget(450, tolerance_pct=2.0),
+                     budget(450, toolchain={"python": "q", "valgrind": "v", "libc": "l"}), budget(450, counter="ir"),
+                     budget(450, schema_version=2), budget(450, workloads={**workloads, "extra": 1}),
+                     budget(450, workloads={"author-stats": 450}), budget(450, extra=1)):
+            with self.subTest(text=text):
+                self.stage(text, self.base, leg="perf")
+                self.assert_refused(self.run_step(PUSH, GIT_COAUTHORSHIP_LEGS="perf"), f"{PERF}: refusing")
+
+    def test_legs_naming_different_commits_are_refused(self) -> None:
+        self.stage(budget(450), "ab" * 20, leg="perf")
+        done = self.run_step(PUSH, GIT_COAUTHORSHIP_LEGS="coverage perf")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("artifact ratchet-perf names no single measured commit", done.stderr)
 
     def test_main_moving_under_the_measured_tree_drops_the_raise(self) -> None:
         tip = self.commit({"tool.py": "x = 2\n"})
@@ -205,6 +251,8 @@ class RatchetPush(unittest.TestCase):
         (self.root / "temp" / "ratchet-repo").mkdir()
         done = self.run_step(PUSH, fresh=False)
         self.assertNotEqual(done.returncode, 0, done.stdout)
+        self.assertIn(str(self.root / "temp" / "ratchet-repo"), done.stderr)
+        self.assertIn("File exists", done.stderr)
         self.assertEqual(self.main_tip(), self.base)
 
     def test_a_rejected_push_fails_unless_main_moved(self) -> None:
@@ -220,6 +268,25 @@ class RatchetPush(unittest.TestCase):
         hook.write_text("#!/bin/sh\nunset GIT_QUARANTINE_PATH GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES\n"
                         f"git update-ref refs/heads/main {moved}\nexit 1\n", encoding="utf-8")
         self.assert_dropped(self.run_step(PUSH), moved, "main moved before the push landed")
+
+
+def conjuncts(condition: str | None) -> set[str]:
+    return {part.strip() for part in (condition or "").removeprefix("${{").removesuffix("}}").split("&&")}
+
+
+class Conditions(unittest.TestCase):
+    def test_the_push_job_follows_only_a_green_push_run_on_main(self) -> None:
+        self.assertEqual(conjuncts(release.jobs("ratchet-push.yml")["push"]["if"]), {
+            "github.event.workflow_run.event == 'push'", "github.event.workflow_run.head_branch == 'main'",
+            "github.event.workflow_run.conclusion == 'success'"})
+
+    def test_each_record_is_staged_and_uploaded_only_by_a_push_to_main(self) -> None:
+        jobs = release.jobs("tests.yml")
+        steps = {step.get("name"): step for job in ("coverage", "perf") for step in jobs[job]["steps"]}
+        for name in ("Stage a raised floor", "Upload the raised floor", "Stage a lowered budget", "Upload the lowered budget"):
+            with self.subTest(step=name):
+                self.assertEqual(conjuncts(steps[name].get("if")),
+                                 {"github.event_name == 'push'", "github.ref == 'refs/heads/main'"})
 
 
 if __name__ == "__main__":
