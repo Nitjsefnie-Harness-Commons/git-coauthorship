@@ -13,6 +13,7 @@ from unittest import mock
 import _util
 
 _RA = _util.load(os.path.join(_util.SCRIPTS, "reauthor.py"))
+_AS = _util.load(os.path.join(_util.SCRIPTS, "author_stats.py"))
 OLD, NEW, HUMAN = ("Peter Z", "p@example.com"), ("Nitjsefnie", "z@example.com"), ("Human", "human@example.com")
 
 
@@ -363,6 +364,65 @@ def test_runs_that_rewrite_nothing(tmp):
             and line in out.splitlines(), (args, out)
     with contextlib.chdir(tmp):
         assert _RA.rename_scope("A", "a@x", False) == (None, [])
+
+
+X, SOB = f"Co-Authored-By: {NEW[0]} <{NEW[1]}>", "Signed-off-by: Dev <dev@example.invalid>"
+# message, then what --recent/--older and what --all leave of it: a new
+# paragraph, joined to git's trailer block, unchanged (None) or this text.
+_SHAPES = [
+    ("two\nCo-Authored-By: Model Y <y@example.invalid>\n", "para", "para"),
+    ("two\n\nCo-authored-by: Model Y <y@example.invalid>\n", None, f"two\n\n{X}\n"),
+    ("two mentions Co-Authored-By support\n", "para", "para"),
+    (f"two\n\n{SOB}\n", "join", "join"),
+    ("two\n\nSee the Co-Authored-By: docs here\n\n\nmore  \n", "para", "para"),
+    (f"two\n\nCo-authored-by: Old\n <o@example.invalid>\nnot a trailer\n{SOB}\nCO-AUTHORED-BY : Old2 <p@x.invalid>\n",
+     None, f"two\n\nnot a trailer\n{SOB}\n{X}\n")]
+
+
+def _trailers(d, *args):
+    return _git(d, "log", "-z", "--format=%(trailers:only,unfold)", *args).stdout.split("\0")[:-1]
+
+
+def test_trailers_are_judged_and_written_as_git_parses_them(tmp):
+    """Each shape in each mode: author-stats' verdict decides a fill and is
+    co-authored after it, every trailer git parsed is still parsed (--all
+    keeps one co-author, X) and no other text moves. --recent needs only git."""
+    modes = [(["--recent", "1", *NEW], 1)] + [(["--older", *NEW], 1), (["--all", *NEW], 2), (
+        ["--all", *NEW, "--stop-at", "HEAD~1"], 2)] * bool(shutil.which("git-filter-repo"))
+    problems = []
+    for i, (shape, (args, column)) in enumerate((s, m) for s in _SHAPES for m in modes):
+        d = os.path.join(tmp, str(i))
+        _util.repo(d, ["zero", "one", "two"], OLD)
+        _out(d, "commit", "-q", "--amend", "--cleanup=verbatim", "-m", shape[0])
+        before, missing = _trailers(d, "-1")[0].splitlines(), _util.call_main(_AS.main, ["s", "-C", d, "HEAD~1.."])[0]
+        _reauthor(d, *args)
+        want = {"para": shape[0] + f"\n{X}\n", "join": shape[0] + f"{X}\n", None: shape[0]}.get(shape[column], shape[column])
+        kept = [t for t in before if column == 1 or not t.lower().startswith("co-authored-by:")]
+        got = (_git(d, "log", "-1", "-z", "--format=%B").stdout[:-1], _trailers(d, "-1")[0].splitlines(),
+               _util.call_main(_AS.main, ["s", "-C", d, "HEAD~1.."])[0])
+        if got != (want, kept + [X] * (want != shape[0]), 0) or column == 1 and missing != (want != shape[0]):
+            problems.append(f"{args} {shape[0]!r}: missing before {missing}, got {got}")
+    assert not problems, "\n".join(problems)
+
+
+def test_older_anchors_and_inherits_only_trailers_git_parses(tmp):
+    """A glued line anchors nothing; a parsed GitHub-cased trailer anchors and
+    is inherited; --between fills interior gaps only."""
+    _require_filter_repo()
+    opus, human = "Co-authored-by: Opus 5 <o@example.invalid>", "Co-Authored-By: Human <h@example.invalid>"
+    _util.repo(tmp, [f"zero\n\n{human}", f"one\n{opus}", f"two\n\n{opus}", "three", f"four\n\n{human}"], OLD)
+    _reauthor(tmp, "--older", *NEW, "--between")
+    assert _trailers(tmp, "--reverse") == [f"{human}\n", f"{X}\n", f"{opus}\n", f"{opus}\n", f"{human}\n"]
+    assert _git(tmp, "log", "-1", "--format=%B", "HEAD~3").stdout == f"one\n{opus}\n\n{X}\n\n"
+
+
+def test_a_trailer_block_missing_from_its_message_is_refused(_tmp):
+    """Writing around a block the message lacks would garble the message."""
+    try:
+        _util.load(os.path.join(_util.SCRIPTS, "_trailers.py")).with_trailer("one\n", "Key: v\n", X)
+    except ValueError:
+        return
+    raise AssertionError("with_trailer wrote around a block the message does not hold")
 
 
 def main():
