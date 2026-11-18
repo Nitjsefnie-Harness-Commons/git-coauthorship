@@ -53,16 +53,18 @@ def numbers(commit: str) -> dict[str, Decimal] | None:
     return {key: Decimal(repr(value)) for key, value in pairs}
 
 
-def judge(commit: str, declared: dict[str, Decimal]) -> list[str]:
-    """Findings for one commit's own raises and declarations; records each key's highest declared value."""
+def judge(commit: str, declared: dict[str, Decimal], last: dict[str, Decimal]) -> list[str]:
+    """Findings for one commit's own raises and declarations; records each key's highest declared value,
+    and its last value, from which a key that comes back after a removal rises."""
     parents = git("rev-list", "--parents", "-n", "1", commit).split()[1:]
     before = [values for values in map(numbers, parents) if values is not None]
     after = numbers(commit) or {}
     raises = {}
     for key, value in after.items():
-        olds = [values[key] for values in before if key in values]
+        olds = [values[key] for values in before if key in values] or ([last[key]] if key in last else [])
         if olds and all(value > old for old in olds):
             raises[key] = (olds, value)
+    last.update(after)
     lines = [line.strip() for line in git("log", "-1", "--format=%B", commit).splitlines()
              if line.strip().startswith(PREFIX)]
     if not raises and not lines:
@@ -103,7 +105,9 @@ def findings(base: str, head: str) -> list[str]:
     if end is None:
         return [f"{DOCUMENT} was deleted"]
     declared: dict[str, Decimal] = {}
-    found = [line for commit in git("rev-list", "--reverse", f"{base}..{head}").split() for line in judge(commit, declared)]
+    last = dict(start)
+    found = [line for commit in git("rev-list", "--reverse", "--topo-order", f"{base}..{head}").split()
+             for line in judge(commit, declared, last)]
     return found + [f"{DOCUMENT}: {key} net raised {start[key]} -> {value} past every declared step"
                     for key, value in sorted(end.items())
                     if key in start and value > max(start[key], declared.get(key, start[key]))]

@@ -122,6 +122,18 @@ class Raise(unittest.TestCase):
         for done in (self.pull(head), self.judge("--event", "push", "--before", self.base, "--head", head)):
             self.assert_refused(done, "workloads.author-stats net raised 500 -> 900000 past every declared step")
 
+    def test_a_readded_key_rises_from_its_last_value_in_the_window(self) -> None:
+        document = json.loads(budget())
+        del document["workloads"]["author-stats"]
+        self.commit({BUDGET: budget(900000)}, declare("workloads.author-stats", 500, 900000))
+        self.commit({BUDGET: budget(501), "tool.py": "x = 2\n"})
+        self.commit({BUDGET: json.dumps(document), "tool.py": "x = 3\n"})
+        undeclared = self.commit({BUDGET: budget(900000), "tool.py": "x = 4\n"})
+        self.assert_refused(self.pull(undeclared), "workloads.author-stats rose 501 -> 900000 on a commit that also touches tool.py")
+        self.git("reset", "-q", "--hard", "HEAD~1")
+        declared = self.commit({BUDGET: budget(900000)}, declare("workloads.author-stats", 501, 900000))
+        self.assert_clean(self.pull(declared))
+
     def test_chained_declared_steps_reach_their_last_value(self) -> None:
         self.commit({BUDGET: budget(600)}, declare("workloads.author-stats", 500, 600))
         self.commit({BUDGET: budget(550), "tool.py": "x = 2\n"})
