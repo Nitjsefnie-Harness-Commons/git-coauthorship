@@ -89,6 +89,17 @@ def test_rewrite_identity_rejects_an_unknown_field(_tmp):
     raise AssertionError("rewrite_identity accepted a bogus field name")
 
 
+def test_zero_match_identity_rewrite_preserves_signed_history(tmp):
+    d = os.path.join(tmp, "r")
+    _util.repo(d, ["subject"], OLD, HUMAN)
+    head = _sign(d)
+
+    out = _reauthor(d, "--reauthor", "Nobody", "nobody@example.invalid", *NEW).stdout
+
+    assert _out(d, "rev-parse", "HEAD") == head, "a zero-match rewrite changed signed history"
+    assert "[filter-repo] --reauthor: 0 matching commits; history left untouched." in out.splitlines(), out
+
+
 def test_stop_at_preserves_a_signed_boundary_object(tmp):
     """The pass prints its count and signature risk; the boundary keeps its bytes."""
     _require_filter_repo()
@@ -110,7 +121,6 @@ def test_stop_at_preserves_a_signed_boundary_object(tmp):
 
 
 def test_identity_rewrite_restores_current_branch_upstream(tmp):
-    """Push URL and extra fetch refspec included; a push still uses the push URL."""
     _require_filter_repo()
     d, _remote = _tracked(tmp)
     push_remote = os.path.join(tmp, "push.git")
@@ -313,9 +323,7 @@ def test_runs_that_rewrite_nothing(tmp):
             (["--dry-run", *_MODES["--reauthor"][0]], 1, "ERROR: --dry-run currently scopes --rename only."),
             (["--dry-run", *rename], 0, "[rename] --dry-run: stopping before any rewrite."),
             (["--rename", "Nobody", "n@example.com", *NEW], 0, none),
-            (["--stop-at", "HEAD~1", *rename], 0, none),
-            (["--reauthor", "Nobody", "n@example.com", *NEW], 0,
-             "[filter-repo] --reauthor: 0 matching commits; history left untouched.")):
+            (["--stop-at", "HEAD~1", *rename], 0, none)):
         status, out, runs = _main_in(d, *args)
         assert (status, runs, _tip(d, "HEAD")) == (code, [], head) and line in out.splitlines(), (args, out)
     with contextlib.chdir(tmp):
