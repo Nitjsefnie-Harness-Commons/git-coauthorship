@@ -21,7 +21,7 @@ from pathlib import Path
 # workflow below has an unfiltered `pull_request:` trigger. pr-gate and
 # pin-guard judge the base, claim runs on comments. A name with no job
 # behind it refuses rather than shrinking the set.
-REQUIRED_JOBS = ("actionlint", "suites", "wheel", "coverage", "pycodestyle",
+REQUIRED_JOBS = ("actionlint", "suites", "wheel", "coverage", "perf", "pycodestyle",
                  "pylint", "pyright", "pip-audit", "analyze", "comment-share",
                  "size-baseline")
 
