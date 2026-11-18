@@ -34,7 +34,8 @@ FIELDS = {"schema_version", "counter", "tolerance_pct", "toolchain", "workloads"
 TOOLCHAIN = ("python", "valgrind", "libc")
 DEFAULT_TOLERANCE_PCT = 1.0
 # name -> (argv after the interpreter, run in the history; exit status; stdout prefix). The history
-# has gaps on purpose, so author-stats exits 1.
+# has gaps on purpose, so author-stats exits 1; perf_reauthor_mapping.py builds reauthor --older's
+# mapping as its main() does and stops before the git-filter-repo rewrite.
 WORKLOADS = {
     "author-stats": (("-m", "git_coauthorship.author_stats"), 1, f"{perf_history.COMMITS} commits, "),
     "reauthor-mapping": (("{code}/perf_reauthor_mapping.py",), 0, "mapping "),
