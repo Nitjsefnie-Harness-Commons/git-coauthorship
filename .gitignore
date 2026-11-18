@@ -34,6 +34,7 @@
 !/requirements-audit.txt
 !/requirements-build.txt
 !/requirements-dev.txt
+!/requirements-diff-cover.txt
 !/requirements-test.txt
 !/requirements-zizmor.txt
 !/run_tests.py

@@ -102,13 +102,18 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # A pull request's merge commit and its first parent, the base it
+          # merged: the changed-lines report below diffs exactly that pair.
+          fetch-depth: 2
           persist-credentials: false
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: requirements-test.txt
+          cache-dependency-path: |
+            requirements-test.txt
+            requirements-diff-cover.txt
 
       - name: Install the coverage toolchain
         # git-filter-repo is what the end-to-end rewrite tests skip without,
@@ -178,6 +183,21 @@ jobs:
           name: coverage-xml
           path: coverage.xml
           if-no-files-found: error
+
+      - name: Coverage of changed lines (informational)
+        if: ${{ !cancelled() && steps.measure.conclusion == 'success' && github.event_name == 'pull_request' }}
+        # Information only: no --fail-under, and continue-on-error keeps a
+        # broken tool run from failing the job. HEAD^1 is the base this
+        # merge commit was built on, however far the base branch has moved.
+        continue-on-error: true
+        run: |
+          python -m pip install --require-hashes -r requirements-diff-cover.txt
+          diff-cover coverage.xml --compare-branch=HEAD^1 --format "markdown:$RUNNER_TEMP/changed-lines.md"
+          {
+            echo '### Coverage of changed lines (informational)'
+            echo
+            cat "$RUNNER_TEMP/changed-lines.md"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Coverage gate
         if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
