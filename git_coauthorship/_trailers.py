@@ -2,7 +2,7 @@
 import re
 import subprocess
 
-COAUTHOR = re.compile(r"^co-authored-by[ \t]*:[ \t]*(.*\S|)", re.I | re.M)
+COAUTHOR = re.compile(r"^co-authored-by[ \t]*:[ \t]*(.*\S|)", re.I | re.M | re.A)
 
 
 def messages(*revs):
