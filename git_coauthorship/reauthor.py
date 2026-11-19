@@ -131,10 +131,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 if __package__:
+    from ._push import push, read_lease
     from ._scope import announce_scope, refs_args, scope_lines, scope_refs
+    from ._trailers import COAUTHOR, messages, with_trailer
 else:  # run as a script or loaded by path: no package to import it from
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from _push import push, read_lease
     from _scope import announce_scope, refs_args, scope_lines, scope_refs
+    from _trailers import COAUTHOR, messages, with_trailer
 
 __version__ = "1.1.0"
 
@@ -250,14 +254,15 @@ def commits_in_window(before=None, after=None):
 
 
 def get_all_trailers():
-    """hash -> first `Co-Authored-By:` trailer line (or None) for EVERY commit,
-    from one `git log -z` pass. Replaces the old per-commit `git log -1`
+    """hash -> first co-author trailer line git parses (or None) for EVERY
+    commit, from one `git log -z` pass, so a commit is co-authored exactly
+    when author_stats.py counts it. Replaces the old per-commit `git log -1`
     subprocess (O(n) process spawns on --older over full history). NUL field
     separator is safe: git refuses to commit text containing NUL (same format
     trick as author_stats.py)."""
     out = subprocess.check_output(
-        ["git", "log", "-z", "--format=%H%x00%B"], timeout=300
-    )
+        ["git", "log", "-z", "--format=%H%x00%(trailers:only,unfold)"],
+        timeout=300)
     tokens = out.split(b"\x00")
     if tokens and not tokens[-1]:
         tokens.pop()
@@ -265,12 +270,8 @@ def get_all_trailers():
     for i in range(0, len(tokens) - len(tokens) % 2, 2):
         h = tokens[i].decode("utf-8", "replace")
         body = tokens[i + 1].decode("utf-8", "replace")
-        trailer = None
-        for line in body.split("\n"):
-            if line.startswith("Co-Authored-By:"):
-                trailer = line.strip()
-                break
-        trailers[h] = trailer
+        found = COAUTHOR.search(body)
+        trailers[h] = found and found.group()
     return trailers
 
 
@@ -335,17 +336,21 @@ def rebase_recent(n, trailer, stop_full=None):
     ).decode().strip().split("\n")
 
     trailer_by_hash = get_all_trailers()
+    texts = messages(f"HEAD~{n}..HEAD")
     lines = []
-    script_path = _amend_script(trailer)
     for c in commits:
         subject = subprocess.check_output(
             ["git", "log", "-1", "--format=%s", c], timeout=120
         ).decode().strip()
         lines.append(f"pick {c} {subject}")
         if trailer_by_hash.get(c) is None:
+            msg = _tmp_path(f"msg_{c}")
+            msg.write_bytes(with_trailer(*texts[c], trailer).encode(
+                "utf-8", "surrogateescape"))
             # git runs exec lines through sh (Git for Windows ships its own);
-            # quote both paths so spaces in TEMP can't split the command.
-            lines.append(f'exec "{sys.executable}" "{script_path}"')
+            # quote the path so spaces in TEMP can't split the command.
+            lines.append("exec git commit --amend --cleanup=verbatim "
+                         f'-F "{msg.as_posix()}" && rm -f "{msg.as_posix()}"')
 
     todo = _tmp_path("rebase_todo")
     todo.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -358,29 +363,6 @@ def rebase_recent(n, trailer, stop_full=None):
     if result.returncode != 0:
         print("ERROR: rebase failed. Resolve manually and run `git rebase --continue`.")
         sys.exit(1)
-
-
-def _amend_script(trailer):
-    """Write the rebase exec-step amend script. The trailer travels via a
-    JSON sidecar — NOT interpolated into the generated source — so a name
-    containing quotes/backslashes can't break or inject the generated code
-    (same hardening as filter_all / rename_trailer / reauthor)."""
-    cfg_path = _tmp_path("amend.json")
-    cfg_path.write_text(json.dumps({"trailer": trailer}), encoding="utf-8")
-    msg_path = _tmp_path("amend_msg")
-    path = _tmp_path("amend.py")
-    code = (
-        "import json, subprocess\n"
-        f"cfg = json.load(open({json.dumps(str(cfg_path))}, encoding='utf-8'))\n"
-        "msg = subprocess.check_output(['git','log','-1','--format=%B']).decode()\n"
-        'if "Co-Authored-By" not in msg:\n'
-        "    new = msg.rstrip() + '\\n\\n' + cfg['trailer'] + '\\n'\n"
-        f"    open({json.dumps(str(msg_path))}, 'w', encoding='utf-8').write(new)\n"
-        f"    subprocess.run(['git','commit','--amend','-F',{json.dumps(str(msg_path))}])\n"
-    )
-    path.write_text(code, encoding="utf-8")
-    path.chmod(0o755)
-    return str(path)
 
 
 def build_mapping(commits, recent_n, recent_trailer, older_default_trailer,
@@ -561,7 +543,8 @@ def _run_filter_repo(command):
     return result
 
 
-def filter_repo_with_mapping(mapping, stop_full=None, all_refs=False):
+def filter_repo_with_mapping(mapping, stop_full=None, all_refs=False,
+                             replace=False):
     if not mapping:
         print("[filter-repo] No matching commits; history left untouched.")
         return
@@ -570,20 +553,24 @@ def filter_repo_with_mapping(mapping, stop_full=None, all_refs=False):
         print("ERROR: git-filter-repo is required for --older / --all but is not installed.")
         sys.exit(1)
 
-    # Write mapping to JSON for the callback to read
+    # Each new message, written here where git's parse of the old one is at
+    # hand, goes to JSON for the callback to read once.
+    texts = messages("--all" if all_refs else "HEAD")
     map_path = _tmp_path("map.json")
-    map_path.write_text(json.dumps(mapping), encoding="utf-8")
+    map_path.write_text(json.dumps({
+        h: with_trailer(*texts[h], trailer, replace)
+        for h, trailer in mapping.items()}), encoding="utf-8")
 
     # Write callback to file (git-filter-repo expects the FUNCTION BODY, not a
     # def). The sidecar path is embedded as a JSON-encoded literal.
     callback_path = _tmp_path("callback.py")
     callback = (
         'import json\n'
-        f'mapping = json.load(open({json.dumps(str(map_path))}, encoding="utf-8"))\n'
-        'commit_id = commit.original_id.decode()\n'
-        'if commit_id in mapping:\n'
-        '    trailer = mapping[commit_id].encode()\n'
-        '    commit.message = commit.message.rstrip(b"\\n") + b"\\n\\n" + trailer + b"\\n"\n'
+        'if "_messages" not in globals():\n'
+        f'    globals()["_messages"] = json.load(open({json.dumps(str(map_path))}, encoding="utf-8"))\n'
+        'message = _messages.get(commit.original_id.decode())\n'
+        'if message is not None:\n'
+        '    commit.message = message.encode("utf-8", "surrogateescape")\n'
     )
     callback_path.write_text(callback, encoding="utf-8")
 
@@ -595,33 +582,22 @@ def filter_repo_with_mapping(mapping, stop_full=None, all_refs=False):
 def filter_all(name, email, stop_full=None, all_refs=False):
     trailer_line = build_trailer(name, email)
     if stop_full is None:
-        # Fast path: rewrite every commit unconditionally via message-callback.
-        # The trailer travels as a JSON-encoded literal so a name/email
-        # containing `"""`, backslashes, or newlines can't escape the source
-        # string and inject arbitrary Python into filter-repo's eval context.
-        trailer_repr = json.dumps(trailer_line)
-        callback = (
-            "import re\n"
-            f"_trailer = {trailer_repr}.encode()\n"
-            'message = re.sub(rb"Co-Authored-By:.*\\n?", b"", message)\n'
-            'message = message.rstrip(b"\\n") + b"\\n\\n" + _trailer + b"\\n"\n'
-            "return message\n"
-        )
-        _run_filter_repo(
-            ["git-filter-repo", "--force", *refs_args(None, all_refs),
-             "--message-callback", callback])
-    else:
-        # Bounded path: build a mapping of {commit_id: trailer} for commits
-        # newer than stop_full, then route through the existing commit-callback
-        # path which is already stop-aware via mapping membership.
-        newer = commits_after_stop(stop_full) or []
-        mapping = {h: trailer_line for h in newer}
-        if not mapping:
-            print("[stop-at] No commits newer than stop boundary — nothing to do.")
-            return
-        print(f"[filter-repo] --all bounded by stop-at: {len(mapping)} commits will be rewritten.")
-        filter_repo_with_mapping(mapping, stop_full=stop_full)
+        # Every commit filter-repo's scope reaches gets the trailer.
+        newer = subprocess.check_output(
+            ["git", "rev-list", "--all" if all_refs else "HEAD"],
+            timeout=120).decode().split()
+        filter_repo_with_mapping(dict.fromkeys(newer, trailer_line),
+                                 all_refs=all_refs, replace=True)
         return
+    # Bounded path: build a mapping of {commit_id: trailer} for commits
+    # newer than stop_full; mapping membership keeps the callback stop-aware.
+    newer = commits_after_stop(stop_full) or []
+    mapping = {h: trailer_line for h in newer}
+    if not mapping:
+        print("[stop-at] No commits newer than stop boundary — nothing to do.")
+        return
+    print(f"[filter-repo] --all bounded by stop-at: {len(mapping)} commits will be rewritten.")
+    filter_repo_with_mapping(mapping, stop_full=stop_full, replace=True)
 
 
 def rename_scope(old_name, old_email, all_refs, scope=None):
@@ -971,6 +947,7 @@ def main():
         print("ERROR: --dry-run currently scopes --rename only.")
         sys.exit(1)
 
+    lease = read_lease() if args.push else None
     dirty = stash_if_needed()
 
     try:
@@ -1031,12 +1008,7 @@ def main():
             recommitter(on, oe, nn, ne, stop_full=stop_full, all_refs=args.all_refs)
 
         if args.push:
-            # Plain --force, not --force-with-lease: a pass without --refs
-            # (--all-refs, no --stop-at) strips remote-tracking refs, so a
-            # lease bails with "stale info" there, and history was just
-            # rewritten on purpose; this one push serves every scope.
-            git("push", "origin", "HEAD", "--force")
-            print("[push] Force-pushed.")
+            push(lease, args.dry_run)
 
     finally:
         if dirty:

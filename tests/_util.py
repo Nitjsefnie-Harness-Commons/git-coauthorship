@@ -6,11 +6,17 @@ Stdlib only and OS-agnostic: these suites run on Linux, macOS and Windows in
 CI, and a POSIX-only assumption here would be a platform failure reported as a
 test failure.
 """
+import contextlib
 import importlib.util
+import io
 import os
+import shutil
+import subprocess
+import sys
 import tempfile
 import traceback
 from pathlib import Path
+from unittest import mock
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = str(_PROJECT_ROOT / "git_coauthorship")
@@ -40,6 +46,56 @@ class Skipped(Exception):
 def skip(reason):
     """End the running test as skipped, with a reason the log will show."""
     raise Skipped(reason)
+
+
+def require_git():
+    if not shutil.which("git"):
+        skip("git is not available on PATH")
+
+
+def git(d, *args, check=True, env=None):
+    """git in `d` -> its CompletedProcess, output as text."""
+    return subprocess.run(["git", "-C", d, *args], capture_output=True,
+                          text=True, check=check, env=env, timeout=60)
+
+
+def commit(d, message, author, committer=None):
+    """Append `message` to f.txt and commit it as ("Name", "mail") `author`
+    and `committer` (default: the author) -> the new commit's hash."""
+    name, email = committer or author
+    env = {**os.environ, "GIT_AUTHOR_NAME": author[0],
+           "GIT_AUTHOR_EMAIL": author[1], "GIT_COMMITTER_NAME": name,
+           "GIT_COMMITTER_EMAIL": email}
+    with open(os.path.join(d, "f.txt"), "a", encoding="utf-8") as f:
+        f.write(message)
+    git(d, "add", "f.txt")
+    git(d, "commit", "-q", "-m", message, env=env)
+    return git(d, "rev-parse", "HEAD").stdout.strip()
+
+
+def repo(d, messages, author, committer=None):
+    """A new repository at `d` on `main`, configured as the committer, with
+    one commit per message -> their hashes."""
+    require_git()
+    os.makedirs(d, exist_ok=True)
+    name, email = committer or author
+    for args in (["init", "-q"], ["checkout", "-q", "-b", "main"],
+                 ["config", "user.name", name], ["config", "user.email", email],
+                 ["config", "commit.gpgsign", "false"]):
+        git(d, *args)
+    return [commit(d, message, author, committer) for message in messages]
+
+
+def call_main(main, argv):
+    """Run a tool's main() as `argv` -> (exit status, stdout, stderr)."""
+    out, err = io.StringIO(), io.StringIO()
+    with mock.patch.object(sys, "argv", argv), \
+            contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        try:
+            code = main() or 0
+        except SystemExit as exc:
+            code = exc.code
+    return code, out.getvalue(), err.getvalue()
 
 
 def _assertion_site(exc):

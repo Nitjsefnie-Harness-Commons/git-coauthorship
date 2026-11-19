@@ -25,9 +25,8 @@ An agent appearing in the AUTHOR list is a misattribution — that is what
 Both helpers are independent — pass either, both, or neither.
 
 Trailer detection is case-insensitive on the key (`co-authored-by:`), so
-GitHub-style `Co-authored-by:` counts as co-authored — unlike
-`reauthor.py`'s strict `Co-Authored-By:` check, whose job is
-"would --recent touch this", not "is this commit compliant".
+GitHub-style `Co-authored-by:` counts as co-authored; `reauthor.py` judges
+co-authorship exactly as this does.
 
 A GitHub bot's commit (author `<name>[bot]`, email
 `[<id>+]<name>[bot]@users.noreply.github.com`) is exempt from the co-author
@@ -49,14 +48,18 @@ python3 author_stats.py abc1234..HEAD      # only commits after abc1234
 """
 
 import argparse
+import os
 import re
 import subprocess
 import sys
 
-__version__ = "1.0.0"
+if __package__:
+    from ._trailers import COAUTHOR
+else:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from _trailers import COAUTHOR
 
-# git trailer keys are conventionally case-insensitive; match accordingly.
-_TRAILER_PREFIX = "co-authored-by:"
+__version__ = "1.0.0"
 
 # NUL as field separator. Git refuses to commit text containing NUL, so this
 # is guaranteed not to appear inside %H / %an / %ad / %s / %B. Earlier
@@ -151,12 +154,7 @@ def coauthor_trailers(body):
 
     Empty list means the commit carries no trailer (not co-authored). A
     commit may legitimately have more than one."""
-    out = []
-    for line in body.splitlines():
-        stripped = line.strip()
-        if stripped.lower().startswith(_TRAILER_PREFIX):
-            out.append(stripped[len(_TRAILER_PREFIX):].strip())
-    return out
+    return COAUTHOR.findall(body)
 
 
 def main():
