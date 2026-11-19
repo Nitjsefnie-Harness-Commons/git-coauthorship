@@ -8,6 +8,8 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
 from unittest import mock
 
 import _util
@@ -367,6 +369,7 @@ def test_runs_that_rewrite_nothing(tmp):
 
 
 X, SOB = f"Co-Authored-By: {NEW[0]} <{NEW[1]}>", "Signed-off-by: Dev <dev@example.invalid>"
+_N6 = "".join(f"n{i}\n" for i in range(6))
 # message, then what --recent/--older and what --all leave of it: a new
 # paragraph, joined to git's trailer block, unchanged (None) or this text.
 _SHAPES = [
@@ -376,7 +379,14 @@ _SHAPES = [
     (f"two\n\n{SOB}\n", "join", "join"),
     ("two\n\nSee the Co-Authored-By: docs here\n\n\nmore  \n", "para", "para"),
     (f"two\n\nCo-authored-by: Old\n <o@example.invalid>\nnot a trailer\n{SOB}\nCO-AUTHORED-BY : Old2 <p@x.invalid>\n",
-     None, f"two\n\nnot a trailer\n{SOB}\n{X}\n")]
+     None, f"two\n\nnot a trailer\n{SOB}\n{X}\n"),
+    (f"two\n\n{SOB}\n\n{SOB}\n# a comment\n", *[f"two\n\n{SOB}\n\n{SOB}\n{X}\n# a comment\n"] * 2),
+    ("two\n\nCo-authored-by: Old\n\t<o@x.invalid>\nReviewed-by: R\n <r@x.invalid>\n", None,
+     f"two\n\nReviewed-by: R\n <r@x.invalid>\n{X}\n"),
+    # git keeps a block holding other lines only while its trailer lines * 3 >= those lines.
+    (f"two\n\n{SOB}\nCo-authored-by: A <a@x.invalid>\n" + _N6, None, f"two\n\n{SOB}\n{_N6}{X}\n"),
+    (f"two\n\n{SOB}\n <d@x.invalid>\n" + "".join(f"Co-authored-by: {c} <c@x.invalid>\n" for c in "ABC") + _N6 + "n6\n",
+     None, f"two\n\n{_N6}n6\n\n{SOB}\n <d@x.invalid>\n{X}\n")]
 
 
 def _trailers(d, *args):
@@ -395,7 +405,9 @@ def test_trailers_are_judged_and_written_as_git_parses_them(tmp):
         _util.repo(d, ["zero", "one", "two"], OLD)
         _out(d, "commit", "-q", "--amend", "--cleanup=verbatim", "-m", shape[0])
         before, missing = _trailers(d, "-1")[0].splitlines(), _util.call_main(_AS.main, ["s", "-C", d, "HEAD~1.."])[0]
+        head = _out(d, "rev-parse", "HEAD")
         _reauthor(d, *args)
+        assert not list(Path(tempfile.gettempdir()).glob(f"coauthor_*_msg_{head}")), "a message sidecar was left"
         want = {"para": shape[0] + f"\n{X}\n", "join": shape[0] + f"{X}\n", None: shape[0]}.get(shape[column], shape[column])
         kept = [t for t in before if column == 1 or not t.lower().startswith("co-authored-by:")]
         got = (_git(d, "log", "-1", "-z", "--format=%B").stdout[:-1], _trailers(d, "-1")[0].splitlines(),
@@ -410,7 +422,7 @@ def test_older_anchors_and_inherits_only_trailers_git_parses(tmp):
     is inherited; --between fills interior gaps only."""
     _require_filter_repo()
     opus, human = "Co-authored-by: Opus 5 <o@example.invalid>", "Co-Authored-By: Human <h@example.invalid>"
-    _util.repo(tmp, [f"zero\n\n{human}", f"one\n{opus}", f"two\n\n{opus}", "three", f"four\n\n{human}"], OLD)
+    _util.repo(tmp, [f"zero\n\n{human}", f"one\n{opus}", f"two\n\n{opus[:-20]}\n {opus[-19:]}", "three", f"four\n\n{human}"], OLD)
     _reauthor(tmp, "--older", *NEW, "--between")
     assert _trailers(tmp, "--reverse") == [f"{human}\n", f"{X}\n", f"{opus}\n", f"{opus}\n", f"{human}\n"]
     assert _git(tmp, "log", "-1", "--format=%B", "HEAD~3").stdout == f"one\n{opus}\n\n{X}\n\n"

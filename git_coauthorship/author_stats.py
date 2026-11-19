@@ -25,8 +25,8 @@ An agent appearing in the AUTHOR list is a misattribution — that is what
 Both helpers are independent — pass either, both, or neither.
 
 Trailer detection is case-insensitive on the key (`co-authored-by:`), so
-GitHub-style `Co-authored-by:` counts as co-authored; `reauthor.py` fills
-exactly the commits this reports missing.
+GitHub-style `Co-authored-by:` counts as co-authored; `reauthor.py` judges
+co-authorship exactly as this does.
 
 A GitHub bot's commit (author `<name>[bot]`, email
 `[<id>+]<name>[bot]@users.noreply.github.com`) is exempt from the co-author

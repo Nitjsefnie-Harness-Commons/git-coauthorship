@@ -350,7 +350,7 @@ def rebase_recent(n, trailer, stop_full=None):
             # git runs exec lines through sh (Git for Windows ships its own);
             # quote the path so spaces in TEMP can't split the command.
             lines.append("exec git commit --amend --cleanup=verbatim "
-                         f'-F "{msg.as_posix()}"')
+                         f'-F "{msg.as_posix()}" && rm -f "{msg.as_posix()}"')
 
     todo = _tmp_path("rebase_todo")
     todo.write_text("\n".join(lines) + "\n", encoding="utf-8")
